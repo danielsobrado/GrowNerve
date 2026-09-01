@@ -1,13 +1,36 @@
 #include "edge_config.h"
 
+#include <ctype.h>
+
 namespace {
 constexpr const char *kNamespace = "grownerve";
 constexpr const char *kVersionKey = "cfgver";
 constexpr const char *kSettingsKey = "cfgblob";
 
 bool validScheduleWindow(int onHour, int onMinute, int offHour, int offMinute) {
-  return onHour >= 0 && onHour <= 23 && offHour >= 0 && offHour <= 23 &&
-         onMinute >= 0 && onMinute <= 59 && offMinute >= 0 && offMinute <= 59;
+  if (onHour < 0 || onHour > 23 || offHour < 0 || offHour > 23 ||
+      onMinute < 0 || onMinute > 59 || offMinute < 0 || offMinute > 59) {
+    return false;
+  }
+  return onHour != offHour || onMinute != offMinute;
+}
+
+bool validPosixTimezone(const char *timezone) {
+  if (timezone == nullptr) return false;
+  const size_t length = strlen(timezone);
+  if (length == 0 || length >= sizeof(EdgeSettings().timezonePosix)) return false;
+  bool hasDigit = false;
+  for (size_t index = 0; index < length; ++index) {
+    const unsigned char value = static_cast<unsigned char>(timezone[index]);
+    if (value == '/' || isspace(value)) return false;
+    if (isdigit(value)) hasDigit = true;
+  }
+  return hasDigit;
+}
+
+bool knownSafeOutput(const char *channelId) {
+  return strcmp(channelId, CHANNEL_LIGHT) == 0 || strcmp(channelId, CHANNEL_FAN) == 0 ||
+         strcmp(channelId, CHANNEL_AIR_PUMP) == 0;
 }
 }  // namespace
 
@@ -16,8 +39,8 @@ bool parseEdgeSettings(const JsonObjectConst &config, EdgeSettings &out, String 
 
   const char *timezone = config["timezonePosix"] | "";
   if (strlen(timezone) > 0) {
-    if (strlen(timezone) >= sizeof(parsed.timezonePosix)) {
-      error = "timezonePosix is too long";
+    if (!validPosixTimezone(timezone)) {
+      error = "timezonePosix must be a POSIX TZ rule with an explicit offset";
       return false;
     }
     strncpy(parsed.timezonePosix, timezone, sizeof(parsed.timezonePosix) - 1);
@@ -41,7 +64,7 @@ bool parseEdgeSettings(const JsonObjectConst &config, EdgeSettings &out, String 
     parsed.photoperiod.offMinute = period["offMinute"] | 0;
     if (!validScheduleWindow(parsed.photoperiod.onHour, parsed.photoperiod.onMinute,
                              parsed.photoperiod.offHour, parsed.photoperiod.offMinute)) {
-      error = "photoperiod times are out of range";
+      error = "photoperiod times are invalid or define an empty window";
       return false;
     }
     strncpy(parsed.photoperiod.channelId, channelId, sizeof(parsed.photoperiod.channelId) - 1);
@@ -76,7 +99,7 @@ bool parseEdgeSettings(const JsonObjectConst &config, EdgeSettings &out, String 
     parsed.fanSchedule.inactivePercent = schedule["inactivePercent"] | 0.0f;
     if (!validScheduleWindow(parsed.fanSchedule.onHour, parsed.fanSchedule.onMinute,
                              parsed.fanSchedule.offHour, parsed.fanSchedule.offMinute)) {
-      error = "fanSchedule times are out of range";
+      error = "fanSchedule times are invalid or define an empty window";
       return false;
     }
     if (parsed.fanSchedule.activePercent < 0 || parsed.fanSchedule.activePercent > 100 ||
@@ -90,19 +113,38 @@ bool parseEdgeSettings(const JsonObjectConst &config, EdgeSettings &out, String 
   if (config["airPumpAlwaysOn"].is<bool>()) {
     parsed.airPumpAlwaysOn = config["airPumpAlwaysOn"];
   }
-  if (config["telemetryIntervalSeconds"].is<uint32_t>()) {
-    parsed.telemetryIntervalSeconds = constrain((uint32_t)config["telemetryIntervalSeconds"], 1U, 3600U);
+  if (config.containsKey("telemetryIntervalSeconds")) {
+    const uint32_t value = config["telemetryIntervalSeconds"] | 0U;
+    if (value > 3600U) {
+      error = "telemetryIntervalSeconds must be between 0 and 3600";
+      return false;
+    }
+    if (value > 0) parsed.telemetryIntervalSeconds = value;
   }
-  if (config["commandTimeoutSeconds"].is<uint32_t>()) {
-    parsed.commandTimeoutSeconds = constrain((uint32_t)config["commandTimeoutSeconds"], 1U, 86400U);
+  if (config.containsKey("commandTimeoutSeconds")) {
+    const uint32_t value = config["commandTimeoutSeconds"] | 0U;
+    if (value > 86400U) {
+      error = "commandTimeoutSeconds must be between 0 and 86400";
+      return false;
+    }
+    if (value > 0) parsed.commandTimeoutSeconds = value;
   }
   if (config["safeOutputs"].is<JsonObjectConst>()) {
     JsonObjectConst safeOutputs = config["safeOutputs"];
     for (JsonPairConst entry : safeOutputs) {
+      const char *channelId = entry.key().c_str();
       const float value = entry.value().as<float>();
-      if (strcmp(entry.key().c_str(), CHANNEL_LIGHT) == 0) parsed.safeLight = value;
-      if (strcmp(entry.key().c_str(), CHANNEL_FAN) == 0) parsed.safeFan = value;
-      if (strcmp(entry.key().c_str(), CHANNEL_AIR_PUMP) == 0) parsed.safeAirPump = value;
+      if (!knownSafeOutput(channelId)) {
+        error = "safeOutputs contains an unknown channel";
+        return false;
+      }
+      if (value < 0 || value > 100) {
+        error = "safeOutputs values must be between 0 and 100";
+        return false;
+      }
+      if (strcmp(channelId, CHANNEL_LIGHT) == 0) parsed.safeLight = value;
+      if (strcmp(channelId, CHANNEL_FAN) == 0) parsed.safeFan = value;
+      if (strcmp(channelId, CHANNEL_AIR_PUMP) == 0) parsed.safeAirPump = value;
     }
   }
 
