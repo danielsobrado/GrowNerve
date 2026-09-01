@@ -4,6 +4,7 @@ import {
   acknowledgeAlert,
   completeGrowCycle,
   evaluateSetpoint,
+  resolveAlert,
   startGrowCycle,
   transitionCommand,
   validateMeasurement,
@@ -39,5 +40,19 @@ describe("GrowNerve domain invariants", () => {
     const data = pilotData();
     expect(acknowledgeAlert(data.alerts[0], "operator", "2026-09-01T12:00:00Z").status).toBe("acknowledged");
     expect(() => transitionCommand({ ...data.commands[0], status: "pending" }, "applied", "2026-09-01T12:00:00Z")).toThrow("Invalid command transition");
+  });
+
+  it("covers invalid lifecycle and quality-aware boundary paths", () => {
+    const data = pilotData();
+    expect(() => startGrowCycle(data.grow_cycles[0], data.recipe_versions[0], new Date().toISOString())).toThrow("planned");
+    expect(() => completeGrowCycle({ ...data.grow_cycles[0], status: "planned" }, new Date().toISOString())).toThrow("active");
+    expect(evaluateSetpoint(20, {})).toBe("unknown");
+    const measurementChannel = data.channels.find((entry) => entry.key === "air.temperature")!;
+    expect(validateMeasurement({ channel_id: measurementChannel.id, value: 100, unit: "degC", observed_at: new Date().toISOString(), quality: "good" }, measurementChannel).quality).toBe("suspect");
+    expect(() => validateMeasurement({ channel_id: measurementChannel.id, value: Number.NaN, unit: "degC", observed_at: new Date().toISOString(), quality: "good" }, measurementChannel)).toThrow("finite");
+    expect(() => validateMeasurement({ channel_id: data.channels.find((entry) => entry.kind === "command")!.id, value: 1, unit: "", observed_at: new Date().toISOString(), quality: "good" }, data.channels.find((entry) => entry.kind === "command")!)).toThrow("measurements");
+    expect(() => acknowledgeAlert({ ...data.alerts[0], status: "resolved" }, "operator", new Date().toISOString())).toThrow("open");
+    expect(resolveAlert(data.alerts[0], new Date().toISOString()).status).toBe("resolved");
+    expect(() => resolveAlert({ ...data.alerts[0], status: "resolved" }, new Date().toISOString())).toThrow("already");
   });
 });

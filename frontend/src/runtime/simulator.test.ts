@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { pilotData } from "./pilotData";
-import { applySimulatedCommand, tickSimulator } from "./simulator";
+import { applySimulatedCommand, setDeviceOnline, tickSimulator } from "./simulator";
 
 describe("browser simulator", () => {
   it("applies a bounded fan command through the lifecycle", () => {
@@ -22,5 +22,17 @@ describe("browser simulator", () => {
     const next = tickSimulator(data, "2026-09-01T12:00:00Z", 44);
     expect(next.measurements.length).toBeGreaterThan(data.measurements.length);
     expect(next.channels.map((channel) => channel.id)).toEqual(channelIds);
+  });
+
+  it("rejects unknown and offline targets and applies boolean commands", () => {
+    const data = pilotData();
+    expect(applySimulatedCommand(data, { targetChannelId: crypto.randomUUID(), value: 1, reason: "test" }).commands.at(-1)?.reason_code).toBe("CHANNEL_NOT_CONTROLLABLE");
+    const fan = data.devices.find((entry) => entry.type === "fan")!;
+    const offline = setDeviceOnline(data, fan.id, false);
+    const fanChannel = offline.channels.find((entry) => entry.device_id === fan.id && entry.kind === "command")!;
+    expect(applySimulatedCommand(offline, { targetChannelId: fanChannel.id, value: 50, reason: "test" }).commands.at(-1)?.reason_code).toBe("DEVICE_OFFLINE");
+    const lightChannel = data.channels.find((entry) => entry.key === "light.state.command")!;
+    expect(applySimulatedCommand(data, { targetChannelId: lightChannel.id, value: false, reason: "test" }).devices.find((entry) => entry.type === "light")?.state).toBe(false);
+    expect(setDeviceOnline(offline, fan.id, true, "2026-09-01T12:00:00Z").devices.find((entry) => entry.id === fan.id)?.last_heartbeat).toBe("2026-09-01T12:00:00Z");
   });
 });

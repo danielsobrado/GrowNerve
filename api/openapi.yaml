@@ -1,0 +1,200 @@
+openapi: 3.1.0
+info:
+  title: GrowNerve API
+  version: 0.1.0
+  description: Local-first indoor farm state, telemetry, history, and control contract.
+  license:
+    name: Proprietary
+    identifier: LicenseRef-Proprietary
+servers:
+  - url: http://127.0.0.1:8080
+security: []
+paths:
+  /health/live:
+    get:
+      summary: Check process liveness
+      operationId: getLiveness
+      responses:
+        "200":
+          description: Process is alive.
+          content: { application/json: { schema: { $ref: "#/components/schemas/Health" } } }
+  /health/ready:
+    get:
+      summary: Check dependency readiness
+      operationId: getReadiness
+      responses:
+        "200": { description: Required dependencies are ready, content: { application/json: { schema: { $ref: "#/components/schemas/Health" } } } }
+        "503": { description: A required dependency is unavailable, content: { application/json: { schema: { $ref: "#/components/schemas/Health" } } } }
+  /api/v1/state:
+    get:
+      summary: Read the complete farm state
+      operationId: getFarmState
+      responses:
+        "200": { description: Browser-compatible complete farm state, headers: { ETag: { schema: { type: string } } }, content: { application/json: { schema: { $ref: "#/components/schemas/FarmState" } } } }
+        "204": { description: No farm has been configured. }
+    put:
+      summary: Replace the complete farm state
+      operationId: replaceFarmState
+      parameters:
+        - in: header
+          name: If-Match
+          schema: { type: string }
+          required: false
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/FarmState" } } }
+      responses:
+        "204": { description: Farm state saved. }
+        "400": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+  /api/v1/overview:
+    get:
+      summary: Read the operational overview
+      operationId: getOverview
+      responses:
+        "200": { description: Operational overview projection, content: { application/json: { schema: { $ref: "#/components/schemas/FarmState" } } } }
+  /api/v1/facilities:
+    get:
+      summary: List facilities
+      operationId: listFacilities
+      responses:
+        "200": { description: Facilities, content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/Facility" } } } } }
+  /api/v1/zones:
+    get:
+      summary: List zones
+      operationId: listZones
+      responses:
+        "200": { description: Zones, content: { application/json: { schema: { type: array, items: { type: object, additionalProperties: true } } } } }
+  /api/v1/reservoirs:
+    get:
+      summary: List reservoirs
+      operationId: listReservoirs
+      responses:
+        "200": { description: Reservoirs, content: { application/json: { schema: { type: array, items: { type: object, additionalProperties: true } } } } }
+  /api/v1/grow-cycles:
+    get:
+      summary: List grow cycles
+      operationId: listGrowCycles
+      responses:
+        "200": { description: Grow cycles, content: { application/json: { schema: { type: array, items: { type: object, additionalProperties: true } } } } }
+  /api/v1/devices:
+    get:
+      summary: List devices
+      operationId: listDevices
+      responses:
+        "200": { description: Devices, content: { application/json: { schema: { type: array, items: { type: object, additionalProperties: true } } } } }
+  /api/v1/channels:
+    get:
+      summary: List logical channels
+      operationId: listChannels
+      responses:
+        "200": { description: Logical channels, content: { application/json: { schema: { type: array, items: { type: object, additionalProperties: true } } } } }
+  /api/v1/measurements:
+    get:
+      summary: List measurements
+      operationId: listMeasurements
+      responses:
+        "200": { description: Bounded measurement data from the compatibility state, content: { application/json: { schema: { type: array, items: { type: object, additionalProperties: true } } } } }
+  /api/v1/events:
+    get:
+      summary: List farm events
+      operationId: listEvents
+      responses:
+        "200": { description: Farm events, content: { application/json: { schema: { type: array, items: { type: object, additionalProperties: true } } } } }
+  /api/v1/alerts:
+    get:
+      summary: List alerts
+      operationId: listAlerts
+      responses:
+        "200": { description: Alerts, content: { application/json: { schema: { type: array, items: { type: object, additionalProperties: true } } } } }
+  /api/v1/commands:
+    get:
+      summary: List commands
+      operationId: listCommands
+      responses:
+        "200": { description: Durable commands, content: { application/json: { schema: { type: array, items: { type: object, additionalProperties: true } } } } }
+    post:
+      summary: Request a validated device command
+      operationId: createCommand
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema: { type: string, minLength: 8, maxLength: 128 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [targetChannelId, value, reason]
+              properties:
+                targetChannelId: { type: string, format: uuid }
+                value: { oneOf: [{ type: number }, { type: boolean }] }
+                reason: { type: string, minLength: 1 }
+                expiresAt: { type: string, format: date-time }
+      responses:
+        "202": { description: Command persisted and accepted for delivery, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+        "422": { $ref: "#/components/responses/Problem" }
+        "400": { $ref: "#/components/responses/Problem" }
+components:
+  schemas:
+    Health:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string }
+        checks: { type: object, additionalProperties: { type: string } }
+    Facility:
+      type: object
+      required: [id, name, timezone]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string, minLength: 1 }
+        timezone: { type: string, minLength: 1 }
+    FarmState:
+      type: object
+      additionalProperties: false
+      required: [facilities, zones, reservoirs, crops, varieties, grow_cycles, plant_positions, recipes, recipe_versions, recipe_stages, setpoints, devices, channels, channel_bindings, measurements, events, event_quantities, observations, inventory_items, inventory_adjustments, harvests, alerts, commands, automation_rules, scene_layouts]
+      properties:
+        facilities: { type: array, items: { $ref: "#/components/schemas/Facility" } }
+        zones: { type: array, items: { type: object, additionalProperties: true } }
+        reservoirs: { type: array, items: { type: object, additionalProperties: true } }
+        crops: { type: array, items: { type: object, additionalProperties: true } }
+        varieties: { type: array, items: { type: object, additionalProperties: true } }
+        grow_cycles: { type: array, items: { type: object, additionalProperties: true } }
+        plant_positions: { type: array, items: { type: object, additionalProperties: true } }
+        recipes: { type: array, items: { type: object, additionalProperties: true } }
+        recipe_versions: { type: array, items: { type: object, additionalProperties: true } }
+        recipe_stages: { type: array, items: { type: object, additionalProperties: true } }
+        setpoints: { type: array, items: { type: object, additionalProperties: true } }
+        devices: { type: array, items: { type: object, additionalProperties: true } }
+        channels: { type: array, items: { type: object, additionalProperties: true } }
+        channel_bindings: { type: array, items: { type: object, additionalProperties: true } }
+        measurements: { type: array, items: { type: object, additionalProperties: true } }
+        events: { type: array, items: { type: object, additionalProperties: true } }
+        event_quantities: { type: array, items: { type: object, additionalProperties: true } }
+        observations: { type: array, items: { type: object, additionalProperties: true } }
+        inventory_items: { type: array, items: { type: object, additionalProperties: true } }
+        inventory_adjustments: { type: array, items: { type: object, additionalProperties: true } }
+        harvests: { type: array, items: { type: object, additionalProperties: true } }
+        alerts: { type: array, items: { type: object, additionalProperties: true } }
+        commands: { type: array, items: { type: object, additionalProperties: true } }
+        automation_rules: { type: array, items: { type: object, additionalProperties: true } }
+        scene_layouts: { type: array, items: { type: object, additionalProperties: true } }
+    Problem:
+      type: object
+      required: [type, title, status, detail, code]
+      properties:
+        type: { type: string, format: uri }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        code: { type: string }
+        correlationId: { type: string }
+  responses:
+    Problem:
+      description: Stable problem details response.
+      content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } }

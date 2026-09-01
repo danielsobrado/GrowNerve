@@ -1,0 +1,52 @@
+version: "3"
+
+tasks:
+  up:
+    desc: Start PostgreSQL, Mosquitto, migrations, and the API
+    cmds: [docker compose up -d --build --wait]
+  down:
+    desc: Stop local services
+    cmds: [docker compose down]
+  migrate:
+    desc: Apply PostgreSQL migrations
+    cmds: [go run ./cmd/migrate up]
+  migrate:down:
+    desc: Revert the latest PostgreSQL schema
+    cmds: [go run ./cmd/migrate down]
+  gen:
+    desc: Regenerate sqlc and OpenAPI code
+    cmds:
+      - sqlc generate
+      - oapi-codegen --config api/oapi-codegen.yaml api/openapi.yaml
+      - { cmd: npm run gen:api, dir: frontend }
+  test:
+    desc: Run backend and frontend unit tests
+    cmds:
+      - go test ./...
+      - { cmd: npm test, dir: frontend }
+  test:all:
+    desc: Run all CI-equivalent local quality gates
+    cmds:
+      - go test -race -cover ./...
+      - go vet ./...
+      - { cmd: npm run typecheck, dir: frontend }
+      - { cmd: npm run lint, dir: frontend }
+      - { cmd: npm run test:coverage, dir: frontend }
+      - { cmd: npm run build, dir: frontend }
+      - { cmd: npm run build:browser, dir: frontend }
+  run:api:
+    desc: Run the Go API
+    cmds: [go run ./cmd/api]
+  run:frontend:
+    desc: Run the server-backed frontend
+    dir: frontend
+    cmds: [npm run dev]
+  run:browser:
+    desc: Run the browser-only frontend
+    dir: frontend
+    cmds: [npm run dev:browser]
+  reset:
+    desc: Recreate local PostgreSQL and Mosquitto data
+    cmds:
+      - docker compose down --volumes
+      - docker compose up -d --build --wait

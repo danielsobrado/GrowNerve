@@ -25,4 +25,18 @@ describe("BrowserFarmRepository contract", () => {
     await expect(repository.importReplace({ format: "wrong" })).rejects.toThrow();
     expect(await repository.load()).toEqual(before);
   });
+
+  it("supports atomic updates, notifications, storage estimates, and empty-state errors", async () => {
+    const repository = new BrowserFarmRepository("grownerve-test");
+    await expect(repository.update(() => undefined)).rejects.toThrow("No local farm");
+    await repository.replace(pilotData());
+    let notifications = 0;
+    const unsubscribe = repository.subscribe(() => { notifications += 1; });
+    const updated = await repository.update((draft) => { draft.facilities[0].name = "Updated Farm"; });
+    expect(updated.facilities[0].name).toBe("Updated Farm");
+    expect(notifications).toBe(1);
+    unsubscribe();
+    Object.defineProperty(navigator, "storage", { configurable: true, value: { estimate: async () => ({ usage: 128, quota: 1024 }) } });
+    expect(await repository.storageEstimate()).toEqual({ usage: 128, quota: 1024 });
+  });
 });

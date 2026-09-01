@@ -36,3 +36,36 @@ func TestStateMachineRejectsInvalidTransition(t *testing.T) {
 		t.Fatalf("Transition() error = %v, want %v", err, ErrInvalidTransition)
 	}
 }
+
+func TestValidateCommonSafetyPaths(t *testing.T) {
+	now := time.Now()
+	base := SafetyContext{Controllable: true, Online: true, Minimum: 0, Maximum: 100}
+	if err := Validate(Request{Value: 50, ExpiresAt: now.Add(time.Minute)}, base, now); err != nil {
+		t.Fatalf("valid command rejected: %v", err)
+	}
+	checks := []struct {
+		context SafetyContext
+		request Request
+		code    string
+	}{
+		{context: SafetyContext{Online: true}, request: Request{ExpiresAt: now.Add(time.Minute)}, code: "CHANNEL_NOT_CONTROLLABLE"},
+		{context: base, request: Request{ExpiresAt: now.Add(-time.Second)}, code: "COMMAND_EXPIRED"},
+	}
+	for _, check := range checks {
+		if err := Validate(check.request, check.context, now); err == nil || err.Code != check.code {
+			t.Fatalf("Validate() = %v, want %s", err, check.code)
+		}
+	}
+	if got := (&SafetyError{Code: "TEST", Detail: "detail"}).Error(); got != "TEST: detail" {
+		t.Fatalf("Error() = %q", got)
+	}
+}
+
+func TestStateMachineValidTransitions(t *testing.T) {
+	command := Command{State: StatePending}
+	for _, state := range []State{StatePublished, StateAcknowledged, StateApplied} {
+		if err := command.Transition(state); err != nil {
+			t.Fatalf("Transition(%s): %v", state, err)
+		}
+	}
+}

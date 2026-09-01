@@ -1,0 +1,22 @@
+env: production
+
+server:
+  address: 127.0.0.1:8080
+  shutdown_timeout: 15s
+  cors_allowed_origins:
+    - https://grownerve.example.com
+
+postgres:
+  url_env: GROWNERVE_DATABASE_URL
+
+mqtt:
+  broker: tls://mqtt.internal:8883
+  client_id: grownerve-server
+
+telemetry:
+  batch_size: 500
+  flush_interval: 1s
+
+media:
+  provider: filesystem
+  path: /var/lib/grownerve/media

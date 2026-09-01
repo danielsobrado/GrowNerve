@@ -19,4 +19,17 @@ describe("portable archive", () => {
     broken.data.zones[0].facility_id = "01990a20-6a00-7000-8000-000000000099";
     expect(() => validateArchive(broken)).toThrow("unknown facility");
   });
+
+  it("rejects missing collections, duplicate IDs, and invalid UUIDs", () => {
+    const archive = createArchive(pilotData());
+    const missing = structuredClone(archive) as unknown as Record<string, unknown>;
+    delete (missing.data as Record<string, unknown>).alerts;
+    expect(() => validateArchive(missing)).toThrow("alerts");
+    const duplicate = structuredClone(archive);
+    duplicate.data.facilities.push(structuredClone(duplicate.data.facilities[0]));
+    expect(() => validateArchive(duplicate)).toThrow("duplicate");
+    const invalid = structuredClone(archive);
+    invalid.data.facilities[0].id = "not-a-uuid";
+    expect(() => validateArchive(invalid)).toThrow("invalid UUID");
+  });
 });

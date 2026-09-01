@@ -28,3 +28,34 @@ func TestProductionRejectsWildcardCORS(t *testing.T) {
 		t.Fatal("Validate() error = nil, want production CORS error")
 	}
 }
+
+func TestValidateRequiredConfiguration(t *testing.T) {
+	valid := Config{Env: "development", Server: Server{Address: ":8080"}, Postgres: Postgres{URLEnv: "DATABASE_URL"}, MQTT: MQTT{Broker: "tcp://mqtt:1883"}}
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("valid configuration: %v", err)
+	}
+	tests := []Config{
+		{Env: "unknown", Server: valid.Server, Postgres: valid.Postgres, MQTT: valid.MQTT},
+		{Env: "development", Postgres: valid.Postgres, MQTT: valid.MQTT},
+		{Env: "development", Server: valid.Server, MQTT: valid.MQTT},
+		{Env: "development", Server: valid.Server, Postgres: valid.Postgres},
+	}
+	for _, config := range tests {
+		if err := config.Validate(); err == nil {
+			t.Fatalf("Validate(%+v) succeeded", config)
+		}
+	}
+}
+
+func TestLoadReportsReadAndParseErrors(t *testing.T) {
+	if _, err := Load(t.TempDir()); err == nil {
+		t.Fatal("missing file succeeded")
+	}
+	directory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(directory, "default.yaml"), []byte("env: ["), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(directory); err == nil {
+		t.Fatal("invalid YAML succeeded")
+	}
+}

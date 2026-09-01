@@ -19,7 +19,9 @@ const routeFromHash = (): RouteKey => {
   return ["overview", "farm", "grows", "twin", "alerts", "history", "inventory", "automation", "devices", "settings"].includes(candidate) ? candidate : "overview";
 };
 
-export function App({ repository, runtimeMode = "browser" }: { repository: FarmRepository & Partial<Pick<BrowserFarmRepository, "importReplace">>; runtimeMode?: RuntimeMode }) {
+type ApplicationRepository = FarmRepository & Partial<Pick<BrowserFarmRepository, "importReplace">> & { issueCommand?: (intent: { targetChannelId: string; value: number | boolean; reason: string }) => Promise<unknown> };
+
+export function App({ repository, runtimeMode = "browser" }: { repository: ApplicationRepository; runtimeMode?: RuntimeMode }) {
   const [data, setData] = useState<FarmData>();
   const [loading, setLoading] = useState(true);
   const [route, setRouteState] = useState<RouteKey>(routeFromHash);
@@ -35,7 +37,7 @@ export function App({ repository, runtimeMode = "browser" }: { repository: FarmR
 
   const actions = useMemo<ScreenActions>(() => ({
     refreshSimulator: () => { if (data) void persist(tickSimulator(data)); },
-    command: (channelId, value, reason) => { if (data) void persist(applySimulatedCommand(data, { targetChannelId: channelId, value, reason })); },
+    command: (channelId, value, reason) => { if (!data) return; if (runtimeMode === "server" && repository.issueCommand) { void repository.issueCommand({ targetChannelId: channelId, value, reason }).then(() => repository.load()).then((next) => { if (next) setData(next); }); } else { void persist(applySimulatedCommand(data, { targetChannelId: channelId, value, reason })); } },
     select: (next) => { setSelection(next); if (next) setRoute("twin"); },
     acknowledgeAlert: (alertId) => { if (!data) return; const next = structuredClone(data); const index = next.alerts.findIndex((entry) => entry.id === alertId); if (index >= 0) next.alerts[index] = acknowledgeAlert(next.alerts[index], "Local Operator", new Date().toISOString()); void persist(next); },
     resolveAlert: (alertId) => { if (!data) return; const next = structuredClone(data); const index = next.alerts.findIndex((entry) => entry.id === alertId); if (index >= 0) next.alerts[index] = resolveAlert(next.alerts[index], new Date().toISOString()); void persist(next); },
@@ -47,7 +49,7 @@ export function App({ repository, runtimeMode = "browser" }: { repository: FarmR
     importArchive: async (archive) => { if (repository.importReplace) await repository.importReplace(archive); else throw new Error("Import is unavailable in this runtime"); setData(await repository.load()); setRoute("overview"); },
     reset,
     loadPilot,
-  }), [data, persist, repository, reset, selection, setRoute, loadPilot]);
+  }), [data, persist, repository, reset, selection, setRoute, loadPilot, runtimeMode]);
 
   useEffect(() => { if (!data || runtimeMode !== "browser") return; const interval = window.setInterval(() => { setData((current) => { if (!current) return current; const next = tickSimulator(current); void repository.replace(next); return next; }); }, 30_000); return () => window.clearInterval(interval); }, [data, repository, runtimeMode]);
 
@@ -71,7 +73,7 @@ export function App({ repository, runtimeMode = "browser" }: { repository: FarmR
   return <AppShell route={route} onRoute={setRoute} runtimeMode={runtimeMode} alertCount={data.alerts.filter((entry) => entry.status !== "resolved").length}>{screen}</AppShell>;
 }
 
-function FirstRun({ repository, onPilot, onCreated }: { repository: FarmRepository & Partial<Pick<BrowserFarmRepository, "importReplace">>; onPilot: () => void; onCreated: (data: FarmData) => void }) {
+function FirstRun({ repository, onPilot, onCreated }: { repository: ApplicationRepository; onPilot: () => void; onCreated: (data: FarmData) => void }) {
   const [error, setError] = useState<string>();
   const createLocal = async () => { const data = emptyFarmData(); data.facilities.push({ id: crypto.randomUUID(), name: "My Indoor Farm", timezone: Intl.DateTimeFormat().resolvedOptions().timeZone }); await repository.replace(data); onCreated(data); };
   const importArchive = async (file?: File) => { if (!file || !repository.importReplace) return; try { setError(undefined); await repository.importReplace(JSON.parse(await file.text())); const data = await repository.load(); if (data) onCreated(data); } catch (cause) { setError(cause instanceof Error ? cause.message : "Import failed"); } };

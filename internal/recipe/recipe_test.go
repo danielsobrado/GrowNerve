@@ -30,3 +30,18 @@ func TestEvaluateSetpoint(t *testing.T) {
 }
 
 func pointer(value float64) *float64 { return &value }
+
+func TestDraftVersionCanChangeAndEmptySetpointIsUnknown(t *testing.T) {
+	version := Version{Status: StatusDraft}
+	stages := []Stage{{Key: "seedling"}}
+	if err := version.ReplaceStages(stages); err != nil {
+		t.Fatal(err)
+	}
+	stages[0].Key = "changed-outside"
+	if version.Stages[0].Key != "seedling" {
+		t.Fatal("ReplaceStages did not copy its input")
+	}
+	if got := Evaluate(20, Setpoint{}); got != TargetUnknown {
+		t.Fatalf("Evaluate() = %q", got)
+	}
+}
