@@ -22,7 +22,8 @@ func pilotConfig() deviceprotocol.EdgeConfig {
 		ProtocolVersion: deviceprotocol.Version, DeviceID: testDevice,
 		ConfigVersion: "pilot-v1", IssuedAt: time.Now().UTC(),
 		Config: deviceprotocol.EdgeSettings{
-			Photoperiod:       &deviceprotocol.Photoperiod{OnHour: 6, OffHour: 24 % 24, OnMinute: 0, OffMinute: 0, ChannelID: lightChannel},
+			TimezonePOSIX:    "GST-4",
+			Photoperiod:      &deviceprotocol.Photoperiod{OnHour: 6, OffHour: 0, OnMinute: 0, OffMinute: 0, ChannelID: lightChannel},
 			FanMinimumPercent: value(30),
 			AirPumpAlwaysOn:   flag(true),
 			SafeOutputs: map[string]float64{
@@ -46,38 +47,50 @@ func at(hour, minute int) time.Time {
 	return time.Date(2026, 6, 15, hour, minute, 0, 0, time.UTC)
 }
 
-// TestEssentialOperationContinuesWithoutAServer is the software half of the
-// phase 8 exit criterion: once configured, the controller keeps running its
-// schedules with no server involved at all.
 func TestEssentialOperationContinuesWithoutAServer(t *testing.T) {
 	controller := configuredController(t)
-
-	// The photoperiod runs 06:00 to 24:00 on the controller's own clock.
 	if resolution := controller.Resolve(lightChannel, at(9, 0)); resolution.Value != 100 || resolution.Source != SourceEssentialSchedule {
 		t.Fatalf("light during the photoperiod = %+v", resolution)
 	}
 	if resolution := controller.Resolve(lightChannel, at(3, 0)); resolution.Value != 0 {
 		t.Fatalf("light outside the photoperiod = %+v", resolution)
 	}
-
-	// Aeration is the output whose failure kills a deep-water crop fastest, so
-	// it must hold without any server contact.
 	if resolution := controller.Resolve(airPumpChannel, at(3, 0)); resolution.Value != 100 {
 		t.Fatalf("air pump stopped with no server: %+v", resolution)
 	}
-
-	// The fan never drops below its configured floor.
 	if resolution := controller.Resolve(fanChannel, at(3, 0)); resolution.Value < 30 {
 		t.Fatalf("fan fell below its minimum: %+v", resolution)
 	}
 }
 
-// TestRebootRecoversFromRetainedConfiguration models a controller restarting
-// during an outage: the broker's retained configuration is all it has.
+func TestFanSchedulePreservesMinimum(t *testing.T) {
+	controller := NewController(testDevice)
+	config := pilotConfig()
+	config.Config.FanSchedule = &deviceprotocol.FanSchedule{
+		ChannelID: fanChannel, OnHour: 8, OffHour: 20,
+		ActivePercent: 70, InactivePercent: 10,
+	}
+	if err := controller.ApplyConfig(config); err != nil {
+		t.Fatal(err)
+	}
+	if got := controller.Resolve(fanChannel, at(12, 0)).Value; got != 70 {
+		t.Fatalf("scheduled fan value = %v, want 70", got)
+	}
+	if got := controller.Resolve(fanChannel, at(2, 0)).Value; got != 30 {
+		t.Fatalf("fan minimum was not preserved: %v", got)
+	}
+}
+
+func TestWallClockScheduleRequiresTimezone(t *testing.T) {
+	config := pilotConfig()
+	config.Config.TimezonePOSIX = ""
+	if err := config.Validate(); err == nil {
+		t.Fatal("wall-clock schedule without timezone was accepted")
+	}
+}
+
 func TestRebootRecoversFromRetainedConfiguration(t *testing.T) {
 	rebooted := NewController(testDevice)
-	// Before configuration, every output sits at its safe default rather than
-	// at whatever it was last commanded to.
 	if resolution := rebooted.Resolve(lightChannel, at(9, 0)); resolution.Source != SourceDefaultSafe {
 		t.Fatalf("an unconfigured controller did not start from safe defaults: %+v", resolution)
 	}
@@ -106,10 +119,21 @@ func TestOverrideExpiresWithoutTheServerRenewingIt(t *testing.T) {
 	if resolution := controller.Resolve(lightChannel, now.Add(time.Minute)); resolution.Value != 80 || resolution.Source != SourceOverride {
 		t.Fatalf("override was not applied: %+v", resolution)
 	}
-	// The server vanishes. The override must lapse on its own rather than
-	// latching the output indefinitely.
 	if resolution := controller.Resolve(lightChannel, now.Add(5*time.Minute)); resolution.Source == SourceOverride {
 		t.Fatalf("an unrenewed override outlived its expiry: %+v", resolution)
+	}
+}
+
+func TestExpiredCommandIsRejected(t *testing.T) {
+	controller := configuredController(t)
+	now := at(3, 0)
+	command := deviceprotocol.Command{
+		ProtocolVersion: deviceprotocol.Version, CommandID: "01990a20-6a00-7000-8000-000000000050",
+		TargetChannelID: lightChannel, Type: "set_percent", Value: float64(80),
+		IssuedAt: now.Add(-time.Minute), ExpiresAt: now.Add(-time.Second),
+	}
+	if err := controller.ApplyCommand(command, now); err == nil {
+		t.Fatal("expired command was accepted")
 	}
 }
 
@@ -124,8 +148,6 @@ func TestControllerTimeoutOutranksAGenerousServerExpiry(t *testing.T) {
 	if err := controller.ApplyCommand(command, now); err != nil {
 		t.Fatal(err)
 	}
-	// The configured 300-second timeout is stricter than the server's 24 hours,
-	// so the controller's own bound is what applies.
 	if resolution := controller.Resolve(fanChannel, now.Add(10*time.Minute)); resolution.Source == SourceOverride {
 		t.Fatalf("a server-supplied expiry overrode the controller's own limit: %+v", resolution)
 	}
@@ -135,7 +157,6 @@ func TestEmergencyStopLatchesAndRefusesCommands(t *testing.T) {
 	controller := configuredController(t)
 	now := at(9, 0)
 	controller.LatchEmergency()
-
 	command := deviceprotocol.Command{
 		ProtocolVersion: deviceprotocol.Version, CommandID: "01990a20-6a00-7000-8000-000000000053",
 		TargetChannelID: lightChannel, Type: "set_percent", Value: float64(100),
@@ -147,11 +168,9 @@ func TestEmergencyStopLatchesAndRefusesCommands(t *testing.T) {
 	if resolution := controller.Resolve(lightChannel, now); resolution.Source != SourceEmergency {
 		t.Fatalf("emergency did not take precedence: %+v", resolution)
 	}
-	// Aeration's safe state is running, so an emergency must not stop it.
 	if resolution := controller.Resolve(airPumpChannel, now); resolution.Value != 100 {
 		t.Fatalf("the emergency stop cut aeration: %+v", resolution)
 	}
-
 	controller.ClearEmergency()
 	if err := controller.ApplyCommand(command, now); err != nil {
 		t.Fatalf("commands were still refused after the emergency cleared: %v", err)
@@ -208,7 +227,6 @@ func TestInvalidConfigurationLeavesTheRunningOneInPlace(t *testing.T) {
 			if controller.ConfigVersion() != "pilot-v1" {
 				t.Fatalf("running configuration was replaced by an invalid one: %q", controller.ConfigVersion())
 			}
-			// The controller must keep working on the last good configuration.
 			if resolution := controller.Resolve(airPumpChannel, at(3, 0)); resolution.Value != 100 {
 				t.Fatalf("aeration stopped after rejecting a bad configuration: %+v", resolution)
 			}
@@ -219,8 +237,6 @@ func TestInvalidConfigurationLeavesTheRunningOneInPlace(t *testing.T) {
 func TestPhotoperiodCrossingMidnight(t *testing.T) {
 	controller := NewController(testDevice)
 	config := pilotConfig()
-	// 18:00 to 02:00 spans midnight, which is how a night-cycle schedule is
-	// expressed.
 	config.Config.Photoperiod = &deviceprotocol.Photoperiod{OnHour: 18, OffHour: 2, ChannelID: lightChannel}
 	if err := controller.ApplyConfig(config); err != nil {
 		t.Fatal(err)
