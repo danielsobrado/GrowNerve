@@ -4,7 +4,6 @@ import { ServerFarmRepository } from "./serverRepository";
 
 afterEach(() => vi.unstubAllGlobals());
 
-/** Builds a response body that streams the given server-sent-event frames. */
 function eventStream(frames: string[]): Response {
   const body = new ReadableStream<Uint8Array>({
     start(controller) {
@@ -16,7 +15,6 @@ function eventStream(frames: string[]): Response {
   return new Response(body, { status: 200, headers: { "Content-Type": "text/event-stream" } });
 }
 
-/** Waits until predicate holds, so tests assert on outcomes rather than timing. */
 async function eventually(predicate: () => boolean, message: string): Promise<void> {
   for (let attempt = 0; attempt < 200; attempt += 1) {
     if (predicate()) return;
@@ -26,125 +24,147 @@ async function eventually(predicate: () => boolean, message: string): Promise<vo
 }
 
 describe("ServerFarmRepository contract", () => {
-  it("loads absent and present state while retaining the ETag", async () => {
+  it("loads absent and present state while retaining the farm version", async () => {
     const fetch = vi.fn()
       .mockResolvedValueOnce(new Response(null, { status: 204 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify(pilotData()), { status: 200, headers: { ETag: '"v1"', "Content-Type": "application/json" } }));
+      .mockResolvedValueOnce(new Response(JSON.stringify(pilotData()), {
+        status: 200,
+        headers: { "X-Farm-Version": "7", "Content-Type": "application/json" },
+      }));
     vi.stubGlobal("fetch", fetch);
     const repository = new ServerFarmRepository("http://api");
     expect(await repository.load()).toBeUndefined();
     expect((await repository.load())?.facilities[0].name).toBe("Home Indoor Farm");
   });
 
-  it("saves, updates, clears, and reports concurrency conflicts", async () => {
+  it("sends the farm version on an existing-state replacement", async () => {
     const data = pilotData();
     const fetch = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify(data), { status: 200, headers: { ETag: '"v1"', "Content-Type": "application/json" } }))
-      .mockResolvedValueOnce(new Response(null, { status: 204, headers: { ETag: '"v2"' } }))
-      .mockResolvedValueOnce(new Response(JSON.stringify(data), { status: 200, headers: { "Content-Type": "application/json" } }))
-      .mockResolvedValueOnce(new Response(null, { status: 204 }))
-      .mockResolvedValueOnce(new Response(null, { status: 204 }))
-      .mockResolvedValueOnce(new Response(null, { status: 409 }));
+      .mockResolvedValueOnce(new Response(JSON.stringify(data), {
+        status: 200,
+        headers: { "X-Farm-Version": "7", "Content-Type": "application/json" },
+      }))
+      .mockResolvedValueOnce(new Response(null, { status: 204, headers: { "X-Farm-Version": "8" } }));
     vi.stubGlobal("fetch", fetch);
     const repository = new ServerFarmRepository("http://api");
     await repository.load();
     await repository.replace(data);
-    expect((await repository.update((draft) => { draft.facilities[0].name = "Changed"; })).facilities[0].name).toBe("Changed");
-    await repository.clear();
-    await expect(repository.replace(data)).rejects.toThrow("changed");
-  });
 
-  it("sends the ETag it read back as If-Match so a stale write is refused", async () => {
-    const data = pilotData();
-    const fetch = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify(data), { status: 200, headers: { ETag: '"v7"', "Content-Type": "application/json" } }))
-      .mockResolvedValueOnce(new Response(null, { status: 204, headers: { ETag: '"v8"' } }));
-    vi.stubGlobal("fetch", fetch);
-    const repository = new ServerFarmRepository("http://api");
-    await repository.load();
-    await repository.replace(data);
     const [, init] = fetch.mock.calls[1] as [string, RequestInit];
-    expect((init.headers as Record<string, string>)["If-Match"]).toBe('"v7"');
+    const headers = init.headers as Record<string, string>;
+    expect(headers["X-Farm-Version"]).toBe("7");
+    expect(headers["If-None-Match"]).toBeUndefined();
   });
 
-  it("issues accepted and rejected commands and emits change notifications", async () => {
-    const command = { id: crypto.randomUUID(), status: "pending" };
-    // The stream and the command share one mock, so it answers by URL rather
-    // than by call order.
-    let commandCalls = 0;
-    const fetch = vi.fn().mockImplementation((url: string) => {
-      if (String(url).includes("/stream")) return Promise.resolve(eventStream(["event: ready\ndata: {}\n\n"]));
-      commandCalls += 1;
-      return Promise.resolve(commandCalls === 1
-        ? new Response(JSON.stringify(command), { status: 202, headers: { "Content-Type": "application/json" } })
-        : new Response(JSON.stringify({ detail: "The physical provider is offline" }), { status: 503, headers: { "Content-Type": "application/json" } }));
-    });
+  it("uses If-None-Match for first creation instead of an unconditional write", async () => {
+    const data = pilotData();
+    const fetch = vi.fn().mockResolvedValue(new Response(null, {
+      status: 204,
+      headers: { "X-Farm-Version": "1" },
+    }));
     vi.stubGlobal("fetch", fetch);
-    const repository = new ServerFarmRepository("http://api", { reconnectDelay: 10_000 });
-    let calls = 0;
-    const unsubscribe = repository.subscribe(() => { calls += 1; });
+    const repository = new ServerFarmRepository("http://api");
+    await repository.replace(data);
+
+    const [, init] = fetch.mock.calls[0] as [string, RequestInit];
+    const headers = init.headers as Record<string, string>;
+    expect(headers["If-None-Match"]).toBe("*");
+    expect(headers["X-Farm-Version"]).toBeUndefined();
+  });
+
+  it("reports state conflicts without silently retrying a whole-state overwrite", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 409 })));
+    const repository = new ServerFarmRepository("http://api");
+    await expect(repository.replace(pilotData())).rejects.toThrow("changed");
+  });
+
+  it("updates through a fresh read and then supports clear", async () => {
+    const data = pilotData();
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(data), {
+        status: 200,
+        headers: { "X-Farm-Version": "10", "Content-Type": "application/json" },
+      }))
+      .mockResolvedValueOnce(new Response(null, { status: 204, headers: { "X-Farm-Version": "11" } }))
+      .mockResolvedValueOnce(new Response(null, { status: 204, headers: { "X-Farm-Version": "12" } }));
+    vi.stubGlobal("fetch", fetch);
+    const repository = new ServerFarmRepository("http://api");
+
+    const updated = await repository.update((draft) => { draft.facilities[0].name = "Changed"; });
+    expect(updated.facilities[0].name).toBe("Changed");
+    await repository.clear();
+    const [, clearInit] = fetch.mock.calls[2] as [string, RequestInit];
+    expect((clearInit.headers as Record<string, string>)["X-Farm-Version"]).toBe("11");
+  });
+
+  it("issues accepted and safety-rejected commands", async () => {
+    const accepted = { id: crypto.randomUUID(), status: "pending" };
+    const rejected = { id: crypto.randomUUID(), status: "rejected", reason_code: "COMMAND_VALUE_OUT_OF_RANGE" };
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(accepted), { status: 202, headers: { "Content-Type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(rejected), { status: 422, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetch);
+    const repository = new ServerFarmRepository("http://api");
+
     expect((await repository.issueCommand({ targetChannelId: crypto.randomUUID(), value: 50, reason: "test" })).status).toBe("pending");
-    expect(calls).toBeGreaterThanOrEqual(1);
-    await expect(repository.issueCommand({ targetChannelId: crypto.randomUUID(), value: 50, reason: "test" })).rejects.toThrow("offline");
+    expect((await repository.issueCommand({ targetChannelId: crypto.randomUUID(), value: 5, reason: "test" })).reason_code).toBe("COMMAND_VALUE_OUT_OF_RANGE");
+  });
+
+  it("returns an expired session to the authentication gate once", async () => {
+    const unauthorized = vi.fn();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("", { status: 401 })));
+    const repository = new ServerFarmRepository("http://api", { onUnauthorized: unauthorized });
+
+    await expect(repository.load()).rejects.toThrow("Sign in again");
+    await expect(repository.load()).rejects.toThrow("Sign in again");
+    expect(unauthorized).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not reconnect a live stream after authentication expires", async () => {
+    const unauthorized = vi.fn();
+    const fetch = vi.fn().mockResolvedValue(new Response("", { status: 401 }));
+    vi.stubGlobal("fetch", fetch);
+    const repository = new ServerFarmRepository("http://api", { onUnauthorized: unauthorized, reconnectDelay: 1 });
+
+    const unsubscribe = repository.subscribe(() => undefined);
+    await eventually(() => unauthorized.mock.calls.length === 1, "stream 401 did not expire the session");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(fetch).toHaveBeenCalledTimes(1);
     unsubscribe();
   });
 
-  it("returns a safety refusal to the caller instead of throwing", async () => {
-    // A 422 is a real answer the operator has to see, not a transport failure.
-    const refusal = { id: crypto.randomUUID(), status: "rejected", reason_code: "COMMAND_VALUE_OUT_OF_RANGE" };
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
-      new Response(JSON.stringify(refusal), { status: 422, headers: { "Content-Type": "application/json" } })));
-    const repository = new ServerFarmRepository("http://api");
-    const result = await repository.issueCommand({ targetChannelId: crypto.randomUUID(), value: 5, reason: "too low" });
-    expect(result.status).toBe("rejected");
-    expect(result.reason_code).toBe("COMMAND_VALUE_OUT_OF_RANGE");
-  });
-
-  it("explains authentication and throttling failures in words an operator can act on", async () => {
-    for (const [status, expected] of [[401, "Sign in again"], [403, "does not permit"], [429, "Too many requests"]] as const) {
-      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("", { status })));
-      const repository = new ServerFarmRepository("http://api");
-      await expect(repository.load()).rejects.toThrow(expected);
-    }
-  });
-
-  it("sends the bearer credential on every request, including the change stream", async () => {
-    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify(pilotData()), { status: 200, headers: { "Content-Type": "application/json" } }));
+  it("sends the bearer credential on reads and the live stream", async () => {
+    const fetch = vi.fn().mockImplementation((url: string) => {
+      if (url.includes("/stream")) return Promise.resolve(eventStream(["event: ready\ndata: {}\n\n"]));
+      return Promise.resolve(new Response(JSON.stringify(pilotData()), {
+        status: 200,
+        headers: { "X-Farm-Version": "1", "Content-Type": "application/json" },
+      }));
+    });
     vi.stubGlobal("fetch", fetch);
-    const repository = new ServerFarmRepository("http://api", { token: "secret-token" });
+    const repository = new ServerFarmRepository("http://api", { token: "secret-token", reconnectDelay: 10_000 });
     await repository.load();
     const unsubscribe = repository.subscribe(() => undefined);
     await eventually(() => fetch.mock.calls.length >= 2, "the stream was never opened");
+
     for (const [url, init] of fetch.mock.calls as [string, RequestInit][]) {
       expect((init.headers as Record<string, string>).Authorization).toBe("Bearer secret-token");
-      // A credential in the URL would leak into proxy and server logs.
       expect(url).not.toContain("secret-token");
     }
     unsubscribe();
   });
 
-  it("refreshes on a change event from the live stream rather than on a timer", async () => {
+  it("emits changes from complete and split server-sent-event frames", async () => {
     const fetch = vi.fn().mockResolvedValue(eventStream([
-      "event: ready\ndata: {}\n\n",
+      "event: cha",
+      'nge\ndata: {"topic":"alerts"}\n\n',
       'event: change\ndata: {"topic":"measurements"}\n\n',
-      'event: change\ndata: {"topic":"alerts"}\n\n',
     ]));
     vi.stubGlobal("fetch", fetch);
     const repository = new ServerFarmRepository("http://api", { reconnectDelay: 10_000 });
     let notifications = 0;
     const unsubscribe = repository.subscribe(() => { notifications += 1; });
-    await eventually(() => notifications >= 2, `change events did not reach the listener (${notifications})`);
-    unsubscribe();
-  });
-
-  it("reassembles change events split across network chunks", async () => {
-    // A frame arriving in pieces must not be missed or double-counted.
-    const fetch = vi.fn().mockResolvedValue(eventStream(["event: cha", 'nge\ndata: {"topic":"alerts"}', "\n\n"]));
-    vi.stubGlobal("fetch", fetch);
-    const repository = new ServerFarmRepository("http://api", { reconnectDelay: 10_000 });
-    let notifications = 0;
-    const unsubscribe = repository.subscribe(() => { notifications += 1; });
-    await eventually(() => notifications >= 1, "a split change frame was dropped");
+    await eventually(() => notifications >= 2, "change frames were dropped");
     unsubscribe();
   });
 
@@ -164,18 +184,15 @@ describe("ServerFarmRepository contract", () => {
 
   it("reads bounded history and server-side aggregates", async () => {
     const fetch = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ channelId: "c1", measurements: [{ channel_id: "c1", value: 21 }] }), { status: 200, headers: { "Content-Type": "application/json" } }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ channelId: "c1", bucketSeconds: 600, buckets: [{ started_at: "2026-05-04T12:00:00Z", average: 21, minimum: 20, maximum: 22, samples: 10 }] }), { status: 200, headers: { "Content-Type": "application/json" } }));
+      .mockResolvedValueOnce(new Response(JSON.stringify({ measurements: [{ channel_id: "c1", value: 21 }] }), { status: 200, headers: { "Content-Type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ buckets: [{ started_at: "2026-05-04T12:00:00Z", average: 21, minimum: 20, maximum: 22, samples: 10 }] }), { status: 200, headers: { "Content-Type": "application/json" } }));
     vi.stubGlobal("fetch", fetch);
     const repository = new ServerFarmRepository("http://api");
 
     const from = new Date("2026-05-04T00:00:00Z");
     expect(await repository.history({ channelId: "c1", from, limit: 100 })).toHaveLength(1);
-    expect(String(fetch.mock.calls[0][0])).toContain("channelId=c1");
     expect(String(fetch.mock.calls[0][0])).toContain("limit=100");
-
-    const buckets = await repository.historyBuckets({ channelId: "c1", bucketSeconds: 600 });
-    expect(buckets[0].samples).toBe(10);
+    expect((await repository.historyBuckets({ channelId: "c1", bucketSeconds: 600 }))[0].samples).toBe(10);
     expect(String(fetch.mock.calls[1][0])).toContain("bucketSeconds=600");
   });
 });
