@@ -32,6 +32,7 @@ type Sample struct {
 	Unit      string  `json:"unit"`
 	Quality   Quality `json:"quality"`
 }
+
 type TelemetryEnvelope struct {
 	ProtocolVersion int       `json:"protocolVersion"`
 	DeviceID        string    `json:"deviceId"`
@@ -98,6 +99,9 @@ func (command Command) Validate(now time.Time) error {
 	if command.IssuedAt.IsZero() || !command.ExpiresAt.After(now) {
 		return errors.New("command is expired or missing time")
 	}
+	if command.IssuedAt.After(now.Add(time.Minute)) {
+		return errors.New("command issuedAt is too far in the future")
+	}
 	return nil
 }
 
@@ -153,8 +157,9 @@ type EdgeConfig struct {
 
 type EdgeSettings struct {
 	// TimezonePOSIX is persisted on the controller and applied through tzset.
-	// Requiring it for wall-clock schedules prevents an apparently local
-	// photoperiod from silently running in UTC.
+	// It is a POSIX TZ rule such as UTC0, GST-4, or PHT-8; IANA names such as
+	// Asia/Dubai are deliberately rejected because the ESP32 C runtime does not
+	// interpret them as zoneinfo identifiers.
 	TimezonePOSIX            string             `json:"timezonePosix,omitempty"`
 	Photoperiod              *Photoperiod       `json:"photoperiod,omitempty"`
 	FanMinimumPercent        *float64           `json:"fanMinimumPercent,omitempty"`
@@ -196,6 +201,26 @@ func validateWindow(onHour, onMinute, offHour, offMinute int) error {
 			return errors.New("schedule minutes must be between 0 and 59")
 		}
 	}
+	if onHour == offHour && onMinute == offMinute {
+		return errors.New("schedule start and end must differ")
+	}
+	return nil
+}
+
+func validatePOSIXTimezone(value string) error {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return errors.New("timezonePosix is required for wall-clock schedules")
+	}
+	if len(value) > 63 {
+		return errors.New("timezonePosix is too long")
+	}
+	if strings.ContainsAny(value, "/\r\n\t ") {
+		return errors.New("timezonePosix must be a POSIX TZ rule, not an IANA timezone name")
+	}
+	if !strings.ContainsAny(value, "0123456789") {
+		return errors.New("timezonePosix must include an explicit UTC offset")
+	}
 	return nil
 }
 
@@ -212,6 +237,11 @@ func (config EdgeConfig) Validate() error {
 	if config.IssuedAt.IsZero() {
 		return errors.New("issuedAt is required")
 	}
+	if config.Config.TimezonePOSIX != "" {
+		if err := validatePOSIXTimezone(config.Config.TimezonePOSIX); err != nil {
+			return err
+		}
+	}
 	if (config.Config.Photoperiod != nil || config.Config.FanSchedule != nil) && strings.TrimSpace(config.Config.TimezonePOSIX) == "" {
 		return errors.New("timezonePosix is required for wall-clock schedules")
 	}
@@ -223,7 +253,7 @@ func (config EdgeConfig) Validate() error {
 			return fmt.Errorf("photoperiod: %w", err)
 		}
 	}
-	if minimum := config.Config.FanMinimumPercent; minimum != nil && (*minimum < 0 || *minimum > 100) {
+	if minimum := config.Config.FanMinimumPercent; minimum != nil && (*minimum < 0 || *minimum > 100 || math.IsNaN(*minimum) || math.IsInf(*minimum, 0)) {
 		return errors.New("fanMinimumPercent must be between 0 and 100")
 	}
 	if schedule := config.Config.FanSchedule; schedule != nil {
@@ -233,12 +263,24 @@ func (config EdgeConfig) Validate() error {
 		if err := validateWindow(schedule.OnHour, schedule.OnMinute, schedule.OffHour, schedule.OffMinute); err != nil {
 			return fmt.Errorf("fanSchedule: %w", err)
 		}
-		if schedule.ActivePercent < 0 || schedule.ActivePercent > 100 || schedule.InactivePercent < 0 || schedule.InactivePercent > 100 {
+		if schedule.ActivePercent < 0 || schedule.ActivePercent > 100 || schedule.InactivePercent < 0 || schedule.InactivePercent > 100 ||
+			math.IsNaN(schedule.ActivePercent) || math.IsNaN(schedule.InactivePercent) || math.IsInf(schedule.ActivePercent, 0) || math.IsInf(schedule.InactivePercent, 0) {
 			return errors.New("fanSchedule percentages must be between 0 and 100")
 		}
 	}
-	if config.Config.TelemetryIntervalSeconds < 0 || config.Config.CommandTimeoutSeconds < 0 {
-		return errors.New("edge intervals cannot be negative")
+	for channelID, value := range config.Config.SafeOutputs {
+		if _, err := uuid.Parse(channelID); err != nil {
+			return errors.New("safeOutputs keys must be channel UUIDs")
+		}
+		if value < 0 || value > 100 || math.IsNaN(value) || math.IsInf(value, 0) {
+			return errors.New("safeOutputs values must be between 0 and 100")
+		}
+	}
+	if config.Config.TelemetryIntervalSeconds < 0 || config.Config.TelemetryIntervalSeconds > 3600 {
+		return errors.New("telemetryIntervalSeconds must be between 0 and 3600")
+	}
+	if config.Config.CommandTimeoutSeconds < 0 || config.Config.CommandTimeoutSeconds > 86400 {
+		return errors.New("commandTimeoutSeconds must be between 0 and 86400")
 	}
 	return nil
 }
