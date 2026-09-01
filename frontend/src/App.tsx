@@ -87,14 +87,14 @@ export function App({ repository, runtimeMode = "browser" }: { repository: Appli
     switch (route) {
       case "farm": return <FarmScreen data={data} actions={actions} />;
       case "grows": return <GrowCyclesScreen data={data} actions={actions} />;
-      case "twin": return <TwinScreen data={data} selection={selection} actions={actions} />;
+      case "twin": return <TwinScreen data={data} selection={selection} actions={actions} runtimeMode={runtimeMode} />;
       case "alerts": return <AlertsScreen data={data} actions={actions} />;
       case "history": return <HistoryScreen data={data} />;
       case "inventory": return <InventoryScreen data={data} actions={actions} />;
-      case "automation": return <AutomationScreen data={data} actions={actions} />;
-      case "devices": return <DevicesScreen data={data} actions={actions} />;
+      case "automation": return <AutomationScreen data={data} actions={actions} runtimeMode={runtimeMode} />;
+      case "devices": return <DevicesScreen data={data} actions={actions} runtimeMode={runtimeMode} />;
       case "settings": return <SettingsScreen data={data} runtimeMode={runtimeMode} actions={actions} />;
-      default: return <OverviewScreen data={data} actions={actions} />;
+      default: return <OverviewScreen data={data} actions={actions} runtimeMode={runtimeMode} />;
     }
   })();
   return <AppShell route={route} onRoute={setRoute} runtimeMode={runtimeMode} alertCount={data.alerts.filter((entry) => entry.status !== "resolved").length}>{screen}</AppShell>;
