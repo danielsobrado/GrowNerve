@@ -16,13 +16,11 @@ type contextKey string
 const correlationKey contextKey = "correlation_id"
 
 type Options struct {
-	AllowedOrigins []string
-	Logger         *slog.Logger
-	// ReadLimit and WriteLimit throttle per client. A zero rate disables that
-	// limiter, which is the right default on a trusted LAN and the wrong one
-	// anywhere else.
-	ReadLimit  RateLimit
-	WriteLimit RateLimit
+	AllowedOrigins    []string
+	TrustedProxyCIDRs []string
+	Logger            *slog.Logger
+	ReadLimit         RateLimit
+	WriteLimit        RateLimit
 }
 
 func CorrelationID(ctx context.Context) string {
@@ -38,6 +36,7 @@ func Chain(next http.Handler, options Options) http.Handler {
 	if options.WriteLimit.Rate > 0 {
 		writeLimiter = NewLimiter(options.WriteLimit)
 	}
+	trustedProxies := parseTrustedProxyCIDRs(options.TrustedProxyCIDRs)
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		started := time.Now()
 		correlationID := request.Header.Get("X-Correlation-ID")
@@ -55,7 +54,8 @@ func Chain(next http.Handler, options Options) http.Handler {
 		if origin != "" && slices.Contains(options.AllowedOrigins, origin) {
 			writer.Header().Set("Access-Control-Allow-Origin", origin)
 			writer.Header().Set("Vary", "Origin")
-			writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Idempotency-Key, If-Match, X-Correlation-ID")
+			writer.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Idempotency-Key, If-Match, If-None-Match, X-Correlation-ID, X-Farm-Version")
+			writer.Header().Set("Access-Control-Expose-Headers", "ETag, X-Correlation-ID, X-Farm-Version")
 			writer.Header().Set("Access-Control-Allow-Methods", "GET, PUT, POST, OPTIONS")
 		}
 		if request.Method == http.MethodOptions {
@@ -66,7 +66,7 @@ func Chain(next http.Handler, options Options) http.Handler {
 		if isMutating(request.Method) {
 			limiter = writeLimiter
 		}
-		if limiter != nil && !limiter.Allow(clientKey(request)) {
+		if limiter != nil && !limiter.Allow(clientKeyWithProxies(request, trustedProxies)) {
 			writer.Header().Set("Retry-After", strconv.Itoa(int(limiter.RetryAfter().Seconds()+1)))
 			if options.Logger != nil {
 				options.Logger.Warn("http_rate_limited", "correlation_id", correlationID, "path", request.URL.Path, "method", request.Method)
