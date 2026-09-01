@@ -121,7 +121,7 @@ func run() error {
 	authenticated := auth.Middleware(authenticator, []string{"/health", "/version"}, logger)(mux)
 	handler := platformmiddleware.Chain(authenticated, platformmiddleware.Options{
 		AllowedOrigins: cfg.Server.CORSAllowedOrigins, TrustedProxyCIDRs: cfg.Server.TrustedProxyCIDRs,
-		Logger: logger,
+		Logger:     logger,
 		ReadLimit:  platformmiddleware.RateLimit{Rate: cfg.Server.RateLimit.ReadPerSecond, Burst: cfg.Server.RateLimit.ReadBurst},
 		WriteLimit: platformmiddleware.RateLimit{Rate: cfg.Server.RateLimit.WritePerSecond, Burst: cfg.Server.RateLimit.WriteBurst},
 	})

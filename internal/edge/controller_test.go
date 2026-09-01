@@ -22,8 +22,8 @@ func pilotConfig() deviceprotocol.EdgeConfig {
 		ProtocolVersion: deviceprotocol.Version, DeviceID: testDevice,
 		ConfigVersion: "pilot-v1", IssuedAt: time.Now().UTC(),
 		Config: deviceprotocol.EdgeSettings{
-			TimezonePOSIX:    "GST-4",
-			Photoperiod:      &deviceprotocol.Photoperiod{OnHour: 6, OffHour: 0, OnMinute: 0, OffMinute: 0, ChannelID: lightChannel},
+			TimezonePOSIX:     "GST-4",
+			Photoperiod:       &deviceprotocol.Photoperiod{OnHour: 6, OffHour: 0, OnMinute: 0, OffMinute: 0, ChannelID: lightChannel},
 			FanMinimumPercent: value(30),
 			AirPumpAlwaysOn:   flag(true),
 			SafeOutputs: map[string]float64{

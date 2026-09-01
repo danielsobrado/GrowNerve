@@ -155,14 +155,14 @@ type EdgeSettings struct {
 	// TimezonePOSIX is persisted on the controller and applied through tzset.
 	// Requiring it for wall-clock schedules prevents an apparently local
 	// photoperiod from silently running in UTC.
-	TimezonePOSIX string `json:"timezonePosix,omitempty"`
-	Photoperiod *Photoperiod `json:"photoperiod,omitempty"`
-	FanMinimumPercent *float64 `json:"fanMinimumPercent,omitempty"`
-	FanSchedule *FanSchedule `json:"fanSchedule,omitempty"`
-	AirPumpAlwaysOn *bool `json:"airPumpAlwaysOn,omitempty"`
-	SafeOutputs map[string]float64 `json:"safeOutputs,omitempty"`
-	TelemetryIntervalSeconds int `json:"telemetryIntervalSeconds,omitempty"`
-	CommandTimeoutSeconds int `json:"commandTimeoutSeconds,omitempty"`
+	TimezonePOSIX            string             `json:"timezonePosix,omitempty"`
+	Photoperiod              *Photoperiod       `json:"photoperiod,omitempty"`
+	FanMinimumPercent        *float64           `json:"fanMinimumPercent,omitempty"`
+	FanSchedule              *FanSchedule       `json:"fanSchedule,omitempty"`
+	AirPumpAlwaysOn          *bool              `json:"airPumpAlwaysOn,omitempty"`
+	SafeOutputs              map[string]float64 `json:"safeOutputs,omitempty"`
+	TelemetryIntervalSeconds int                `json:"telemetryIntervalSeconds,omitempty"`
+	CommandTimeoutSeconds    int                `json:"commandTimeoutSeconds,omitempty"`
 }
 
 type Photoperiod struct {

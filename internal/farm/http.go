@@ -237,7 +237,7 @@ func (handler *Handler) createCommand(writer http.ResponseWriter, request *http.
 	handler.record(request.Context(), AuditEntry{
 		Actor: ActorOf(request), Action: "command.requested", TargetType: "channel", TargetID: intent.TargetChannelID,
 		CorrelationID: request.Header.Get("X-Correlation-ID"),
-		Detail: map[string]any{"reason": intent.Reason, "status": outcome.record["status"], "rejection": outcome.record["reason_code"]},
+		Detail:        map[string]any{"reason": intent.Reason, "status": outcome.record["status"], "rejection": outcome.record["reason_code"]},
 	})
 
 	if outcome.safety == nil && handler.publisher != nil {
