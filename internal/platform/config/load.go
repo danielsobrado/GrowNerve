@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -44,6 +45,9 @@ func applyEnvironment(config *Config) {
 	if value := strings.TrimSpace(os.Getenv("APP_SERVER__CORS_ALLOWED_ORIGINS")); value != "" {
 		config.Server.CORSAllowedOrigins = splitList(value)
 	}
+	if value := strings.TrimSpace(os.Getenv("APP_SERVER__TRUSTED_PROXY_CIDRS")); value != "" {
+		config.Server.TrustedProxyCIDRs = splitList(value)
+	}
 	if value := strings.TrimSpace(os.Getenv("APP_TELEMETRY__RETENTION")); value != "" {
 		if parsed, err := time.ParseDuration(value); err == nil {
 			config.Telemetry.Retention = parsed
@@ -69,8 +73,6 @@ func splitList(value string) []string {
 	return items
 }
 
-// applyDefaults fills values that have a safe answer, so a minimal configuration
-// file still produces a complete, running system.
 func applyDefaults(config *Config) {
 	if config.Auth.Mode == "" {
 		config.Auth.Mode = ModeDev
@@ -104,7 +106,6 @@ func applyDefaults(config *Config) {
 	}
 }
 
-// Authentication modes.
 const (
 	ModeDev   = "dev"
 	ModeLocal = "local"
@@ -124,10 +125,12 @@ func (config Config) Validate() error {
 	if strings.TrimSpace(config.MQTT.Broker) == "" {
 		return errors.New("mqtt.broker is required")
 	}
+	for _, cidr := range config.Server.TrustedProxyCIDRs {
+		if _, _, err := net.ParseCIDR(cidr); err != nil {
+			return fmt.Errorf("server.trusted_proxy_cidrs contains invalid CIDR %q", cidr)
+		}
+	}
 	switch config.Auth.Mode {
-	// An unset mode defaults to dev during loading. Production refuses both the
-	// unset and the explicit dev value below, so the default can never make a
-	// real deployment unauthenticated.
 	case "", ModeDev, ModeLocal, ModeOIDC:
 	default:
 		return fmt.Errorf("auth.mode must be %s, %s, or %s", ModeDev, ModeLocal, ModeOIDC)
@@ -143,9 +146,6 @@ func (config Config) Validate() error {
 	return config.validateProduction()
 }
 
-// validateProduction refuses the shortcuts that are convenient in development
-// and dangerous in a real deployment. A production process must not be able to
-// start with authentication disabled or with an origin wildcard.
 func (config Config) validateProduction() error {
 	if config.Env != "production" {
 		return nil
