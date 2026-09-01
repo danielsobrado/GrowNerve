@@ -172,7 +172,7 @@ export function DevicesScreen({ data, actions, runtimeMode }: { data: FarmData; 
 
 export function SettingsScreen({ data, runtimeMode, actions }: { data: FarmData; runtimeMode: RuntimeMode; actions: ScreenActions }) {
   const input = useRef<HTMLInputElement>(null), [includeMedia, setIncludeMedia] = useState(true), [error, setError] = useState<string>();
-  const importFile = async (event: ChangeEvent<HTMLInputElement>) => { const file = event.target.files?.[0]; if (!file) return; try { setError(undefined); await actions.importArchive(JSON.parse(await file.text()) as GrowNerveArchive); } catch (cause) { setError(cause instanceof Error ? cause.message : "Import failed"; } finally { event.target.value = ""; } };
+  const importFile = async (event: ChangeEvent<HTMLInputElement>) => { const file = event.target.files?.[0]; if (!file) return; try { setError(undefined); await actions.importArchive(JSON.parse(await file.text()) as GrowNerveArchive); } catch (cause) { setError(cause instanceof Error ? cause.message : "Import failed"); } finally { event.target.value = ""; } };
   const estimatedBytes = new Blob([JSON.stringify(data)]).size;
   const browser = runtimeMode === "browser";
   return <><PageHeader eyebrow="Runtime and data portability" title="Settings" description={browser ? "Browser data stays in IndexedDB and can be moved or restored through the complete versioned GrowNerve archive." : "Server data is persisted by the Go/PostgreSQL runtime; deployment authentication and backups are managed by the server environment."} />
