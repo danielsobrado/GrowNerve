@@ -28,7 +28,7 @@ services:
       retries: 12
 
   migrate:
-    image: golang:1.25-alpine
+    image: golang:1.25.13-alpine
     working_dir: /src
     volumes: [".:/src"]
     environment:
@@ -53,7 +53,7 @@ services:
 
   simulator:
     profiles: ["simulator"]
-    image: golang:1.25-alpine
+    image: golang:1.25.13-alpine
     working_dir: /src
     volumes: [".:/src"]
     command: ["go", "run", "./cmd/device-simulator", "-broker", "tcp://mosquitto:1883"]

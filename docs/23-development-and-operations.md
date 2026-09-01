@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- Go 1.25.6 or newer compatible patch release
+- Go 1.25.13 or newer compatible patch release
 - Node.js 22.13 and npm 10.9 or newer
 - Docker with Compose v2 for the full local stack
 - optional generation tools: `sqlc` and `oapi-codegen`

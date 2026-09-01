@@ -1,0 +1,8 @@
+.env*
+coverage
+dev-dist
+dist
+node_modules
+playwright-report
+test-results
+*.tsbuildinfo
