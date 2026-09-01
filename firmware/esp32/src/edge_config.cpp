@@ -4,14 +4,32 @@ namespace {
 constexpr const char *kNamespace = "grownerve";
 constexpr const char *kVersionKey = "cfgver";
 constexpr const char *kSettingsKey = "cfgblob";
+
+bool validScheduleWindow(int onHour, int onMinute, int offHour, int offMinute) {
+  return onHour >= 0 && onHour <= 23 && offHour >= 0 && offHour <= 23 &&
+         onMinute >= 0 && onMinute <= 59 && offMinute >= 0 && offMinute <= 59;
+}
 }  // namespace
 
 bool parseEdgeSettings(const JsonObjectConst &config, EdgeSettings &out, String &error) {
   EdgeSettings parsed;
 
+  const char *timezone = config["timezonePosix"] | "";
+  if (strlen(timezone) > 0) {
+    if (strlen(timezone) >= sizeof(parsed.timezonePosix)) {
+      error = "timezonePosix is too long";
+      return false;
+    }
+    strncpy(parsed.timezonePosix, timezone, sizeof(parsed.timezonePosix) - 1);
+  }
+
   if (config["photoperiod"].is<JsonObjectConst>()) {
     JsonObjectConst period = config["photoperiod"];
     const char *channelId = period["channelId"] | "";
+    if (strlen(timezone) == 0) {
+      error = "timezonePosix is required for photoperiod";
+      return false;
+    }
     if (strlen(channelId) != 36) {
       error = "photoperiod channelId must be a UUID";
       return false;
@@ -21,10 +39,8 @@ bool parseEdgeSettings(const JsonObjectConst &config, EdgeSettings &out, String 
     parsed.photoperiod.onMinute = period["onMinute"] | 0;
     parsed.photoperiod.offHour = period["offHour"] | 0;
     parsed.photoperiod.offMinute = period["offMinute"] | 0;
-    if (parsed.photoperiod.onHour < 0 || parsed.photoperiod.onHour > 23 ||
-        parsed.photoperiod.offHour < 0 || parsed.photoperiod.offHour > 23 ||
-        parsed.photoperiod.onMinute < 0 || parsed.photoperiod.onMinute > 59 ||
-        parsed.photoperiod.offMinute < 0 || parsed.photoperiod.offMinute > 59) {
+    if (!validScheduleWindow(parsed.photoperiod.onHour, parsed.photoperiod.onMinute,
+                             parsed.photoperiod.offHour, parsed.photoperiod.offMinute)) {
       error = "photoperiod times are out of range";
       return false;
     }
@@ -39,14 +55,43 @@ bool parseEdgeSettings(const JsonObjectConst &config, EdgeSettings &out, String 
     }
     parsed.hasFanMinimum = true;
   }
+
+  if (config["fanSchedule"].is<JsonObjectConst>()) {
+    JsonObjectConst schedule = config["fanSchedule"];
+    const char *channelId = schedule["channelId"] | "";
+    if (strlen(timezone) == 0) {
+      error = "timezonePosix is required for fanSchedule";
+      return false;
+    }
+    if (strlen(channelId) != 36) {
+      error = "fanSchedule channelId must be a UUID";
+      return false;
+    }
+    parsed.fanSchedule.configured = true;
+    parsed.fanSchedule.onHour = schedule["onHour"] | 0;
+    parsed.fanSchedule.onMinute = schedule["onMinute"] | 0;
+    parsed.fanSchedule.offHour = schedule["offHour"] | 0;
+    parsed.fanSchedule.offMinute = schedule["offMinute"] | 0;
+    parsed.fanSchedule.activePercent = schedule["activePercent"] | 0.0f;
+    parsed.fanSchedule.inactivePercent = schedule["inactivePercent"] | 0.0f;
+    if (!validScheduleWindow(parsed.fanSchedule.onHour, parsed.fanSchedule.onMinute,
+                             parsed.fanSchedule.offHour, parsed.fanSchedule.offMinute)) {
+      error = "fanSchedule times are out of range";
+      return false;
+    }
+    if (parsed.fanSchedule.activePercent < 0 || parsed.fanSchedule.activePercent > 100 ||
+        parsed.fanSchedule.inactivePercent < 0 || parsed.fanSchedule.inactivePercent > 100) {
+      error = "fanSchedule percentages must be between 0 and 100";
+      return false;
+    }
+    strncpy(parsed.fanSchedule.channelId, channelId, sizeof(parsed.fanSchedule.channelId) - 1);
+  }
+
   if (config["airPumpAlwaysOn"].is<bool>()) {
     parsed.airPumpAlwaysOn = config["airPumpAlwaysOn"];
   }
   if (config["telemetryIntervalSeconds"].is<uint32_t>()) {
-    const uint32_t interval = config["telemetryIntervalSeconds"];
-    // A pathological interval would either flood the broker or make the device
-    // look offline, so it is clamped rather than trusted.
-    parsed.telemetryIntervalSeconds = constrain(interval, 1U, 3600U);
+    parsed.telemetryIntervalSeconds = constrain((uint32_t)config["telemetryIntervalSeconds"], 1U, 3600U);
   }
   if (config["commandTimeoutSeconds"].is<uint32_t>()) {
     parsed.commandTimeoutSeconds = constrain((uint32_t)config["commandTimeoutSeconds"], 1U, 86400U);
@@ -76,9 +121,6 @@ bool loadEdgeSettings(Preferences &storage, EdgeSettings &settings, String &vers
   storage.begin(kNamespace, true);
   const size_t stored = storage.getBytesLength(kSettingsKey);
   bool restored = false;
-  // A struct of a different size means the firmware changed shape since the
-  // configuration was written. Discarding it is safer than reinterpreting bytes
-  // that no longer mean what they did.
   if (stored == sizeof(settings)) {
     storage.getBytes(kSettingsKey, &settings, sizeof(settings));
     version = storage.getString(kVersionKey, "");
