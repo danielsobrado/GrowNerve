@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -46,6 +47,9 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("load configuration: %w", err)
 	}
+	if err := validateRuntimeSecrets(cfg); err != nil {
+		return err
+	}
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
 	authenticator, err := buildAuthenticator(cfg)
@@ -64,6 +68,7 @@ func run() error {
 	defer cancelRuntime()
 
 	stateStore := farm.NewPostgresStore(pool)
+	stateCommitter := farm.NewPostgresStateCommitter(pool)
 	samples := telemetry.NewPostgresStore(pool)
 	queue := outbox.NewPostgresStore(pool)
 	recorder := audit.NewRecorder(pool, logger)
@@ -89,7 +94,13 @@ func run() error {
 	health := httpx.NewHealthHandler(func() error {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		return pool.Ping(ctx)
+		if err := pool.Ping(ctx); err != nil {
+			return err
+		}
+		if !bridge.Connected() {
+			return errors.New("MQTT broker is unavailable")
+		}
+		return nil
 	})
 
 	mux := http.NewServeMux()
@@ -101,26 +112,23 @@ func run() error {
 	})
 	mux.HandleFunc("GET /api/v1/stream", events.Stream)
 	mux.Handle("/api/v1/", farm.NewHandler(stateStore,
+		farm.WithStateCommitter(stateCommitter),
 		farm.WithCommandPublisher(publisher), farm.WithTelemetry(samples), farm.WithMediaStore(mediaStore),
 		farm.WithRegistry(registry.NewPostgresProjector(pool)),
 		farm.WithNotifier(events), farm.WithAuthorizer(farm.RoleAuthorizer{}),
 		farm.WithAuditRecorder(recorder), farm.WithLogger(logger)))
 
-	// Authentication wraps everything except the probes, so no API path can be
-	// reached without an identity having been established.
 	authenticated := auth.Middleware(authenticator, []string{"/health", "/version"}, logger)(mux)
 	handler := platformmiddleware.Chain(authenticated, platformmiddleware.Options{
-		AllowedOrigins: cfg.Server.CORSAllowedOrigins,
-		Logger:         logger,
-		ReadLimit:      platformmiddleware.RateLimit{Rate: cfg.Server.RateLimit.ReadPerSecond, Burst: cfg.Server.RateLimit.ReadBurst},
-		WriteLimit:     platformmiddleware.RateLimit{Rate: cfg.Server.RateLimit.WritePerSecond, Burst: cfg.Server.RateLimit.WriteBurst},
+		AllowedOrigins: cfg.Server.CORSAllowedOrigins, TrustedProxyCIDRs: cfg.Server.TrustedProxyCIDRs,
+		Logger: logger,
+		ReadLimit:  platformmiddleware.RateLimit{Rate: cfg.Server.RateLimit.ReadPerSecond, Burst: cfg.Server.RateLimit.ReadBurst},
+		WriteLimit: platformmiddleware.RateLimit{Rate: cfg.Server.RateLimit.WritePerSecond, Burst: cfg.Server.RateLimit.WriteBurst},
 	})
 
 	server := &http.Server{
 		Addr: cfg.Server.Address, Handler: handler,
 		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 35 * time.Second,
-		// The event stream is long-lived, so a global write timeout would cut it.
-		// Per-request deadlines guard the rest instead.
 		WriteTimeout: 0, IdleTimeout: 90 * time.Second,
 	}
 	serverErrors := make(chan error, 1)
@@ -143,10 +151,18 @@ func run() error {
 	defer cancel()
 	shutdownErr := server.Shutdown(shutdownContext)
 	cancelRuntime()
-	// The audit queue is drained before exit so actions accepted during the last
-	// moments of the process are not lost.
 	recorder.Wait()
 	return shutdownErr
+}
+
+func validateRuntimeSecrets(cfg config.Config) error {
+	if cfg.Env != "production" {
+		return nil
+	}
+	if strings.TrimSpace(os.Getenv(cfg.MQTT.UsernameEnv)) == "" || strings.TrimSpace(os.Getenv(cfg.MQTT.PasswordEnv)) == "" {
+		return errors.New("production MQTT credential environment variables must contain non-empty values")
+	}
+	return nil
 }
 
 func runtimeConfig(cfg config.Config) runtime.Config {
