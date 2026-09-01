@@ -5,6 +5,7 @@
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <PubSubClient.h>
+#include <ctype.h>
 #include <esp_task_wdt.h>
 #include <time.h>
 
@@ -15,11 +16,13 @@
 namespace {
 
 constexpr int kProtocolVersion = 1;
-constexpr const char *kFirmwareVersion = "0.1.1";
+constexpr const char *kFirmwareVersion = "0.1.2";
 constexpr uint8_t kLightRelayPin = 26;
 constexpr uint8_t kFanPwmPin = 27;
 constexpr uint8_t kAirPumpRelayPin = 25;
-constexpr uint8_t kEmergencyInputPin = 34;
+// GPIO33 supports the internal pull-up used by the normally-closed emergency
+// input. GPIO34 is input-only but has no internal pull-up and can float.
+constexpr uint8_t kEmergencyInputPin = 33;
 constexpr uint8_t kFanPwmChannel = 0;
 constexpr uint32_t kFanPwmFrequency = 25000;
 constexpr uint8_t kFanPwmResolution = 8;
@@ -80,10 +83,27 @@ bool currentTimes(struct tm &localTime, char *iso, size_t isoSize) {
   return strftime(iso, isoSize, "%Y-%m-%dT%H:%M:%SZ", &utcTime) > 0;
 }
 
+bool validTimestampSuffix(const char *text) {
+  const size_t length = strlen(text);
+  if (length == 20) return text[19] == 'Z';
+  if (length < 22 || text[19] != '.' || text[length - 1] != 'Z') return false;
+  for (size_t index = 20; index + 1 < length; ++index) {
+    if (!isdigit(static_cast<unsigned char>(text[index]))) return false;
+  }
+  return true;
+}
+
 bool parseUtcTimestamp(const char *text, time_t &out) {
-  if (text == nullptr || strlen(text) < 20 || text[strlen(text) - 1] != 'Z') return false;
+  if (text == nullptr || strlen(text) < 20 || !validTimestampSuffix(text)) return false;
+  if (text[4] != '-' || text[7] != '-' || text[10] != 'T' || text[13] != ':' || text[16] != ':') return false;
+
   int year, month, day, hour, minute, second;
   if (sscanf(text, "%d-%d-%dT%d:%d:%d", &year, &month, &day, &hour, &minute, &second) != 6) return false;
+  if (year < 1970 || year > 2100 || month < 1 || month > 12 || day < 1 || day > 31 ||
+      hour < 0 || hour > 23 || minute < 0 || minute > 59 || second < 0 || second > 60) {
+    return false;
+  }
+
   struct tm parsed = {};
   parsed.tm_year = year - 1900;
   parsed.tm_mon = month - 1;
@@ -92,7 +112,13 @@ bool parseUtcTimestamp(const char *text, time_t &out) {
   parsed.tm_min = minute;
   parsed.tm_sec = second;
   out = timegm(&parsed);
-  return out > 0;
+  if (out <= 0) return false;
+
+  struct tm normalized;
+  gmtime_r(&out, &normalized);
+  return normalized.tm_year == year - 1900 && normalized.tm_mon == month - 1 &&
+         normalized.tm_mday == day && normalized.tm_hour == hour && normalized.tm_min == minute &&
+         normalized.tm_sec == second;
 }
 
 Override *overrideFor(const char *channelId) {
