@@ -79,6 +79,19 @@ jobs:
           path: frontend/playwright-report/
           retention-days: 14
 
+  firmware-quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.13" }
+      - name: Install PlatformIO
+        run: python -m pip install --disable-pip-version-check platformio==6.1.18
+      - name: Build ESP32 reference firmware
+        run: |
+          cp firmware/esp32/include/secrets.example.h firmware/esp32/include/secrets.h
+          platformio run --project-dir firmware/esp32
+
   integration:
     runs-on: ubuntu-latest
     services:
@@ -95,16 +108,12 @@ jobs:
     env:
       MIGRATION_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/grownerve_test?sslmode=disable
       GROWNERVE_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/grownerve_test?sslmode=disable
-      # These two are what make the integration tests actually connect. Without
-      # them the suite silently skips every test that needs a real dependency.
       GROWNERVE_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/grownerve_test?sslmode=disable
       GROWNERVE_TEST_MQTT_BROKER: tcp://localhost:1883
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with: { go-version: "1.25.13", cache: true }
-      # The broker is started after checkout rather than as a service container,
-      # because it needs the repository's development configuration mounted.
       - name: Start the test broker
         run: |
           docker run -d --name grownerve-test-broker -p 1883:1883 \
@@ -121,8 +130,6 @@ jobs:
         run: go run ./cmd/migrate up && go run ./cmd/migrate down && go run ./cmd/migrate up
       - name: Integration tests against PostgreSQL and the broker
         run: go test -race ./...
-      # A silently skipped integration test is worse than none, so the build
-      # fails if any of them opted out instead of running.
       - name: Fail if the integration tests skipped instead of running
         run: |
           go test -count=1 -v \
@@ -138,7 +145,7 @@ jobs:
 
   images:
     runs-on: ubuntu-latest
-    needs: [backend-quality, frontend-quality, browser-e2e, integration]
+    needs: [backend-quality, frontend-quality, browser-e2e, firmware-quality, integration]
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
