@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -140,4 +141,90 @@ type Health struct {
 	ActiveConfigVersion string    `json:"activeConfigVersion"`
 	ObservedAt          time.Time `json:"observedAt"`
 	SensorFaults        []string  `json:"sensorFaults"`
+}
+
+// EdgeConfig is the configuration a controller persists and keeps applying when
+// the server is unreachable. It is delivered retained, so a controller that
+// reboots during an outage recovers its schedules from the broker.
+type EdgeConfig struct {
+	ProtocolVersion int          `json:"protocolVersion"`
+	DeviceID        string       `json:"deviceId"`
+	ConfigVersion   string       `json:"configVersion"`
+	IssuedAt        time.Time    `json:"issuedAt"`
+	Config          EdgeSettings `json:"config"`
+}
+
+// EdgeSettings are the essential behaviours a controller must be able to run
+// alone. Anything that needs server judgement deliberately does not appear here.
+type EdgeSettings struct {
+	// Photoperiod drives the light on a local clock.
+	Photoperiod *Photoperiod `json:"photoperiod,omitempty"`
+	// FanMinimumPercent is the floor the circulation fan never drops below.
+	FanMinimumPercent *float64 `json:"fanMinimumPercent,omitempty"`
+	// AirPumpAlwaysOn keeps reservoir aeration running, which is the one output
+	// whose failure kills a deep-water crop fastest.
+	AirPumpAlwaysOn *bool `json:"airPumpAlwaysOn,omitempty"`
+	// SafeOutputs are the values every output falls back to when nothing else
+	// applies, keyed by channel id.
+	SafeOutputs map[string]float64 `json:"safeOutputs,omitempty"`
+	// TelemetryIntervalSeconds paces local sampling.
+	TelemetryIntervalSeconds int `json:"telemetryIntervalSeconds,omitempty"`
+	// CommandTimeoutSeconds bounds how long a manual override survives without
+	// being renewed, so a lost server cannot leave an output latched forever.
+	CommandTimeoutSeconds int `json:"commandTimeoutSeconds,omitempty"`
+}
+
+// Photoperiod is a daily light schedule on the controller's local clock. OffHour
+// may be less than OnHour, which expresses a schedule that crosses midnight.
+type Photoperiod struct {
+	OnHour    int    `json:"onHour"`
+	OnMinute  int    `json:"onMinute"`
+	OffHour   int    `json:"offHour"`
+	OffMinute int    `json:"offMinute"`
+	ChannelID string `json:"channelId"`
+}
+
+func (config EdgeConfig) Validate() error {
+	if config.ProtocolVersion != Version {
+		return errors.New("unsupported protocol version")
+	}
+	if _, err := uuid.Parse(config.DeviceID); err != nil {
+		return errors.New("deviceId must be a UUID")
+	}
+	if strings.TrimSpace(config.ConfigVersion) == "" {
+		return errors.New("configVersion is required")
+	}
+	if config.IssuedAt.IsZero() {
+		return errors.New("issuedAt is required")
+	}
+	if period := config.Config.Photoperiod; period != nil {
+		if _, err := uuid.Parse(period.ChannelID); err != nil {
+			return errors.New("photoperiod channelId must be a UUID")
+		}
+		for _, value := range []int{period.OnHour, period.OffHour} {
+			if value < 0 || value > 23 {
+				return errors.New("photoperiod hours must be between 0 and 23")
+			}
+		}
+		for _, value := range []int{period.OnMinute, period.OffMinute} {
+			if value < 0 || value > 59 {
+				return errors.New("photoperiod minutes must be between 0 and 59")
+			}
+		}
+	}
+	if minimum := config.Config.FanMinimumPercent; minimum != nil && (*minimum < 0 || *minimum > 100) {
+		return errors.New("fanMinimumPercent must be between 0 and 100")
+	}
+	return nil
+}
+
+// ConfigAcknowledgement reports whether a controller adopted a configuration. It
+// is the only trustworthy evidence that a schedule change reached the hardware.
+type ConfigAcknowledgement struct {
+	ProtocolVersion int       `json:"protocolVersion"`
+	DeviceID        string    `json:"deviceId"`
+	ConfigVersion   string    `json:"configVersion"`
+	Accepted        bool      `json:"accepted"`
+	Detail          string    `json:"detail,omitempty"`
+	AcknowledgedAt  time.Time `json:"acknowledgedAt"`
 }

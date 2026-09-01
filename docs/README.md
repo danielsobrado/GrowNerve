@@ -28,6 +28,8 @@ This directory is the implementation blueprint for GrowNerve. Documents are orde
 22. [Implementation status and external gates](22-implementation-status.md)
 23. [Development, operations, and commissioning](23-development-and-operations.md)
 
+The ESP32 controller lives in [`firmware/esp32`](../firmware/esp32/README.md).
+
 ## Runtime modes
 
 GrowNerve deliberately supports two modes from one frontend codebase:
@@ -53,6 +55,10 @@ Both expose the same product UI, entity identities, grow-management concepts, hi
 - Browser persistence uses IndexedDB, not `localStorage`.
 - Browser exports are versioned and validated before import.
 - Configuration belongs in YAML/environment configuration, not hidden constants in application code.
+- A production process refuses to start with development authentication, wildcard CORS, an unbounded write rate, or an anonymous broker.
+- Authorization and safety are separate checks; neither substitutes for the other.
+- Concurrent writes to farm state conflict rather than silently overwriting one another.
+- Measurement history is append-only and stored apart from the configuration document.
 - The system stays a modular monolith until actual scaling pressure demonstrates a need to split it.
 
 ## Reference installation

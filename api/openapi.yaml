@@ -8,12 +8,16 @@ info:
     identifier: LicenseRef-Proprietary
 servers:
   - url: http://127.0.0.1:8080
-security: []
+# Every API path requires a bearer credential. The health probes and the version
+# endpoint opt out individually, because an orchestrator holds no credential.
+security:
+  - bearerAuth: []
 paths:
   /health/live:
     get:
       summary: Check process liveness
       operationId: getLiveness
+      security: []
       responses:
         "200":
           description: Process is alive.
@@ -22,6 +26,7 @@ paths:
     get:
       summary: Check dependency readiness
       operationId: getReadiness
+      security: []
       responses:
         "200": { description: Required dependencies are ready, content: { application/json: { schema: { $ref: "#/components/schemas/Health" } } } }
         "503": { description: A required dependency is unavailable, content: { application/json: { schema: { $ref: "#/components/schemas/Health" } } } }
@@ -44,9 +49,14 @@ paths:
         required: true
         content: { application/json: { schema: { $ref: "#/components/schemas/FarmState" } } }
       responses:
-        "204": { description: Farm state saved. }
+        "204": { description: Farm state saved., headers: { ETag: { schema: { type: string } } } }
         "400": { $ref: "#/components/responses/Problem" }
-        "409": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "409": { description: The state changed since it was read; reload before saving., content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "413": { $ref: "#/components/responses/Problem" }
+        "415": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/Problem" }
   /api/v1/overview:
     get:
       summary: Read the operational overview
@@ -93,8 +103,84 @@ paths:
     get:
       summary: List measurements
       operationId: listMeasurements
+      description: The newest measurement per channel. Full history is served by /api/v1/measurements/history.
       responses:
-        "200": { description: Bounded measurement data from the compatibility state, content: { application/json: { schema: { type: array, items: { type: object, additionalProperties: true } } } } }
+        "200": { description: Latest measurement per channel, content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/Measurement" } } } } }
+  /api/v1/measurements/latest:
+    get:
+      summary: Read the newest measurement per channel
+      operationId: listLatestMeasurements
+      responses:
+        "200": { description: Latest measurement per channel, content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/Measurement" } } } } }
+  /api/v1/measurements/history:
+    get:
+      summary: Read bounded measurement history for one channel
+      operationId: getMeasurementHistory
+      description: >-
+        Every read is bounded. Omitting from and to reads the last 24 hours, and
+        limit is clamped to the server maximum. Supplying bucketSeconds returns
+        server-side aggregates instead of raw samples.
+      parameters:
+        - { in: query, name: channelId, required: true, schema: { type: string, format: uuid } }
+        - { in: query, name: from, required: false, schema: { type: string, format: date-time } }
+        - { in: query, name: to, required: false, schema: { type: string, format: date-time } }
+        - { in: query, name: limit, required: false, schema: { type: integer, minimum: 1, maximum: 5000 } }
+        - { in: query, name: bucketSeconds, required: false, schema: { type: integer, minimum: 1 } }
+      responses:
+        "200":
+          description: Raw samples, or aggregates when bucketSeconds is supplied.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/MeasurementPage"
+                  - $ref: "#/components/schemas/BucketPage"
+        "400": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
+  /api/v1/stream:
+    get:
+      summary: Subscribe to live change hints
+      operationId: streamChanges
+      description: >-
+        A server-sent-event stream of small invalidation envelopes. It carries no
+        farm data: a client is told which topic changed and re-reads it through
+        the normal authorized endpoints.
+      responses:
+        "200":
+          description: An open event stream.
+          content:
+            text/event-stream:
+              schema: { type: string }
+  /api/v1/media:
+    post:
+      summary: Upload an observation photograph
+      operationId: uploadMedia
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        "201": { description: Stored object metadata, content: { application/json: { schema: { $ref: "#/components/schemas/MediaObject" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "413": { $ref: "#/components/responses/Problem" }
+        "415": { $ref: "#/components/responses/Problem" }
+  /api/v1/media/{id}:
+    get:
+      summary: Download a stored photograph
+      operationId: downloadMedia
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The stored image.
+          content:
+            application/octet-stream: { schema: { type: string, format: binary } }
+        "404": { $ref: "#/components/responses/Problem" }
   /api/v1/events:
     get:
       summary: List farm events
@@ -136,8 +222,14 @@ paths:
                 expiresAt: { type: string, format: date-time }
       responses:
         "202": { description: Command persisted and accepted for delivery, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
-        "422": { $ref: "#/components/responses/Problem" }
+        "200": { description: A retry of an already-accepted command; the original record is returned, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
         "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { description: The command was refused by a safety interlock. Authorization and safety are separate checks., content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "429": { $ref: "#/components/responses/Problem" }
 components:
   schemas:
     Health:
@@ -183,6 +275,51 @@ components:
         commands: { type: array, items: { type: object, additionalProperties: true } }
         automation_rules: { type: array, items: { type: object, additionalProperties: true } }
         scene_layouts: { type: array, items: { type: object, additionalProperties: true } }
+    Measurement:
+      type: object
+      required: [channel_id, observed_at, value, unit, quality]
+      properties:
+        id: { type: string, format: uuid }
+        channel_id: { type: string, format: uuid }
+        observed_at: { type: string, format: date-time }
+        received_at: { type: string, format: date-time }
+        sequence: { type: integer, format: int64 }
+        value: { type: number }
+        unit: { type: string, minLength: 1 }
+        quality: { type: string, enum: [good, suspect, stale, calibrating, fault, unknown] }
+        source_device_id: { type: string, format: uuid }
+    MeasurementPage:
+      type: object
+      required: [channelId, measurements]
+      properties:
+        channelId: { type: string, format: uuid }
+        measurements: { type: array, items: { $ref: "#/components/schemas/Measurement" } }
+    Bucket:
+      type: object
+      required: [started_at, average, minimum, maximum, samples]
+      properties:
+        started_at: { type: string, format: date-time }
+        average: { type: number }
+        minimum: { type: number }
+        maximum: { type: number }
+        samples: { type: integer, format: int64 }
+    BucketPage:
+      type: object
+      required: [channelId, bucketSeconds, buckets]
+      properties:
+        channelId: { type: string, format: uuid }
+        bucketSeconds: { type: integer }
+        buckets: { type: array, items: { $ref: "#/components/schemas/Bucket" } }
+    MediaObject:
+      type: object
+      required: [id, filename, mime_type, size_bytes, sha256, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        filename: { type: string }
+        mime_type: { type: string, enum: ["image/jpeg", "image/png", "image/webp", "image/gif"] }
+        size_bytes: { type: integer, format: int64 }
+        sha256: { type: string }
+        created_at: { type: string, format: date-time }
     Problem:
       type: object
       required: [type, title, status, detail, code]
@@ -194,6 +331,14 @@ components:
         instance: { type: string }
         code: { type: string }
         correlationId: { type: string }
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: >-
+        A local-mode token or an OIDC access token. The server decides
+        authorization from the principal's role; a permitted request can still be
+        refused by a safety interlock.
   responses:
     Problem:
       description: Stable problem details response.

@@ -7,64 +7,39 @@ package gen
 
 import (
 	"context"
-
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const getBrowserCompatibleState = `-- name: GetBrowserCompatibleState :one
-SELECT state FROM browser_compatible_states WHERE singleton = TRUE
+SELECT state, version FROM browser_compatible_states WHERE singleton = TRUE
 `
 
-func (q *Queries) GetBrowserCompatibleState(ctx context.Context) ([]byte, error) {
+type GetBrowserCompatibleStateRow struct {
+	State   []byte `json:"state"`
+	Version int64  `json:"version"`
+}
+
+func (q *Queries) GetBrowserCompatibleState(ctx context.Context) (GetBrowserCompatibleStateRow, error) {
 	row := q.db.QueryRow(ctx, getBrowserCompatibleState)
-	var state []byte
-	err := row.Scan(&state)
-	return state, err
+	var i GetBrowserCompatibleStateRow
+	err := row.Scan(&i.State, &i.Version)
+	return i, err
 }
 
-const listPendingOutboxMessages = `-- name: ListPendingOutboxMessages :many
-SELECT id, topic, message_key, payload, attempts
-FROM outbox_messages
-WHERE published_at IS NULL
-ORDER BY created_at
-LIMIT $1
+const insertBrowserCompatibleState = `-- name: InsertBrowserCompatibleState :one
+INSERT INTO browser_compatible_states (singleton, state, version)
+VALUES (TRUE, $1, 1)
+ON CONFLICT (singleton) DO NOTHING
+RETURNING version
 `
 
-type ListPendingOutboxMessagesRow struct {
-	ID         pgtype.UUID `json:"id"`
-	Topic      string      `json:"topic"`
-	MessageKey string      `json:"message_key"`
-	Payload    []byte      `json:"payload"`
-	Attempts   int32       `json:"attempts"`
+func (q *Queries) InsertBrowserCompatibleState(ctx context.Context, state []byte) (int64, error) {
+	row := q.db.QueryRow(ctx, insertBrowserCompatibleState, state)
+	var version int64
+	err := row.Scan(&version)
+	return version, err
 }
 
-func (q *Queries) ListPendingOutboxMessages(ctx context.Context, batchSize int32) ([]ListPendingOutboxMessagesRow, error) {
-	rows, err := q.db.Query(ctx, listPendingOutboxMessages, batchSize)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []ListPendingOutboxMessagesRow{}
-	for rows.Next() {
-		var i ListPendingOutboxMessagesRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.Topic,
-			&i.MessageKey,
-			&i.Payload,
-			&i.Attempts,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const saveBrowserCompatibleState = `-- name: SaveBrowserCompatibleState :one
+const overwriteBrowserCompatibleState = `-- name: OverwriteBrowserCompatibleState :one
 INSERT INTO browser_compatible_states (singleton, state, version)
 VALUES (TRUE, $1, 1)
 ON CONFLICT (singleton) DO UPDATE
@@ -74,8 +49,29 @@ SET state = EXCLUDED.state,
 RETURNING version
 `
 
-func (q *Queries) SaveBrowserCompatibleState(ctx context.Context, state []byte) (int64, error) {
-	row := q.db.QueryRow(ctx, saveBrowserCompatibleState, state)
+func (q *Queries) OverwriteBrowserCompatibleState(ctx context.Context, state []byte) (int64, error) {
+	row := q.db.QueryRow(ctx, overwriteBrowserCompatibleState, state)
+	var version int64
+	err := row.Scan(&version)
+	return version, err
+}
+
+const updateBrowserCompatibleStateIfVersion = `-- name: UpdateBrowserCompatibleStateIfVersion :one
+UPDATE browser_compatible_states
+SET state = $1,
+    version = version + 1,
+    updated_at = clock_timestamp()
+WHERE singleton = TRUE AND version = $2
+RETURNING version
+`
+
+type UpdateBrowserCompatibleStateIfVersionParams struct {
+	State   []byte `json:"state"`
+	Version int64  `json:"version"`
+}
+
+func (q *Queries) UpdateBrowserCompatibleStateIfVersion(ctx context.Context, arg UpdateBrowserCompatibleStateIfVersionParams) (int64, error) {
+	row := q.db.QueryRow(ctx, updateBrowserCompatibleStateIfVersion, arg.State, arg.Version)
 	var version int64
 	err := row.Scan(&version)
 	return version, err

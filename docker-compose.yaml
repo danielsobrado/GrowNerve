@@ -43,12 +43,20 @@ services:
       GROWNERVE_DATABASE_URL: postgresql://grownerve_app:app_password@postgres:5432/grownerve?sslmode=disable
       APP_SERVER__ADDRESS: 0.0.0.0:8080
       APP_MQTT__BROKER: tcp://mosquitto:1883
+      # Development authentication. A production process refuses to start in
+      # this mode; see config/production.example.yaml.
+      APP_AUTH__MODE: ${APP_AUTH__MODE:-dev}
+      GROWNERVE_LOCAL_ACCOUNTS: ${GROWNERVE_LOCAL_ACCOUNTS:-}
+      APP_TELEMETRY__RETENTION: ${APP_TELEMETRY__RETENTION:-}
+      APP_MEDIA__PATH: /var/lib/grownerve/media
+    volumes:
+      - media-data:/var/lib/grownerve/media
     ports: ["127.0.0.1:${GROWNERVE_API_PORT:-8080}:8080"]
     depends_on:
       migrate: { condition: service_completed_successfully }
       mosquitto: { condition: service_healthy }
     healthcheck:
-      test: ["CMD", "/app/grownerve-api"]
+      test: ["CMD", "/app/grownerve-api", "-health-check"]
       disable: true
 
   simulator:
@@ -63,3 +71,4 @@ services:
 volumes:
   postgres-data:
   mosquitto-data:
+  media-data:

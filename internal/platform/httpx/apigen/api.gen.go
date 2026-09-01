@@ -6,6 +6,7 @@
 package apigen
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -14,6 +15,44 @@ import (
 	"github.com/oapi-codegen/runtime"
 	openapi_types "github.com/oapi-codegen/runtime/types"
 )
+
+const (
+	BearerAuthScopes = "bearerAuth.Scopes"
+)
+
+// Defines values for MeasurementQuality.
+const (
+	Calibrating MeasurementQuality = "calibrating"
+	Fault       MeasurementQuality = "fault"
+	Good        MeasurementQuality = "good"
+	Stale       MeasurementQuality = "stale"
+	Suspect     MeasurementQuality = "suspect"
+	Unknown     MeasurementQuality = "unknown"
+)
+
+// Defines values for MediaObjectMimeType.
+const (
+	Imagegif  MediaObjectMimeType = "image/gif"
+	Imagejpeg MediaObjectMimeType = "image/jpeg"
+	Imagepng  MediaObjectMimeType = "image/png"
+	Imagewebp MediaObjectMimeType = "image/webp"
+)
+
+// Bucket defines model for Bucket.
+type Bucket struct {
+	Average   float32   `json:"average"`
+	Maximum   float32   `json:"maximum"`
+	Minimum   float32   `json:"minimum"`
+	Samples   int64     `json:"samples"`
+	StartedAt time.Time `json:"started_at"`
+}
+
+// BucketPage defines model for BucketPage.
+type BucketPage struct {
+	BucketSeconds int                `json:"bucketSeconds"`
+	Buckets       []Bucket           `json:"buckets"`
+	ChannelId     openapi_types.UUID `json:"channelId"`
+}
 
 // Facility defines model for Facility.
 type Facility struct {
@@ -57,6 +96,41 @@ type Health struct {
 	Status string             `json:"status"`
 }
 
+// Measurement defines model for Measurement.
+type Measurement struct {
+	ChannelId      openapi_types.UUID  `json:"channel_id"`
+	Id             *openapi_types.UUID `json:"id,omitempty"`
+	ObservedAt     time.Time           `json:"observed_at"`
+	Quality        MeasurementQuality  `json:"quality"`
+	ReceivedAt     *time.Time          `json:"received_at,omitempty"`
+	Sequence       *int64              `json:"sequence,omitempty"`
+	SourceDeviceId *openapi_types.UUID `json:"source_device_id,omitempty"`
+	Unit           string              `json:"unit"`
+	Value          float32             `json:"value"`
+}
+
+// MeasurementQuality defines model for Measurement.Quality.
+type MeasurementQuality string
+
+// MeasurementPage defines model for MeasurementPage.
+type MeasurementPage struct {
+	ChannelId    openapi_types.UUID `json:"channelId"`
+	Measurements []Measurement      `json:"measurements"`
+}
+
+// MediaObject defines model for MediaObject.
+type MediaObject struct {
+	CreatedAt time.Time           `json:"created_at"`
+	Filename  string              `json:"filename"`
+	Id        openapi_types.UUID  `json:"id"`
+	MimeType  MediaObjectMimeType `json:"mime_type"`
+	Sha256    string              `json:"sha256"`
+	SizeBytes int64               `json:"size_bytes"`
+}
+
+// MediaObjectMimeType defines model for MediaObject.MimeType.
+type MediaObjectMimeType string
+
 // Problem defines model for Problem.
 type Problem struct {
 	Code          string  `json:"code"`
@@ -92,6 +166,20 @@ type CreateCommandJSONBody_Value struct {
 	union json.RawMessage
 }
 
+// GetMeasurementHistoryParams defines parameters for GetMeasurementHistory.
+type GetMeasurementHistoryParams struct {
+	ChannelId     openapi_types.UUID `form:"channelId" json:"channelId"`
+	From          *time.Time         `form:"from,omitempty" json:"from,omitempty"`
+	To            *time.Time         `form:"to,omitempty" json:"to,omitempty"`
+	Limit         *int               `form:"limit,omitempty" json:"limit,omitempty"`
+	BucketSeconds *int               `form:"bucketSeconds,omitempty" json:"bucketSeconds,omitempty"`
+}
+
+// UploadMediaMultipartBody defines parameters for UploadMedia.
+type UploadMediaMultipartBody struct {
+	File openapi_types.File `json:"file"`
+}
+
 // ReplaceFarmStateParams defines parameters for ReplaceFarmState.
 type ReplaceFarmStateParams struct {
 	IfMatch *string `json:"If-Match,omitempty"`
@@ -99,6 +187,9 @@ type ReplaceFarmStateParams struct {
 
 // CreateCommandJSONRequestBody defines body for CreateCommand for application/json ContentType.
 type CreateCommandJSONRequestBody CreateCommandJSONBody
+
+// UploadMediaMultipartRequestBody defines body for UploadMedia for multipart/form-data ContentType.
+type UploadMediaMultipartRequestBody UploadMediaMultipartBody
 
 // ReplaceFarmStateJSONRequestBody defines body for ReplaceFarmState for application/json ContentType.
 type ReplaceFarmStateJSONRequestBody = FarmState
@@ -132,6 +223,18 @@ type ServerInterface interface {
 	// List measurements
 	// (GET /api/v1/measurements)
 	ListMeasurements(w http.ResponseWriter, r *http.Request)
+	// Read bounded measurement history for one channel
+	// (GET /api/v1/measurements/history)
+	GetMeasurementHistory(w http.ResponseWriter, r *http.Request, params GetMeasurementHistoryParams)
+	// Read the newest measurement per channel
+	// (GET /api/v1/measurements/latest)
+	ListLatestMeasurements(w http.ResponseWriter, r *http.Request)
+	// Upload an observation photograph
+	// (POST /api/v1/media)
+	UploadMedia(w http.ResponseWriter, r *http.Request)
+	// Download a stored photograph
+	// (GET /api/v1/media/{id})
+	DownloadMedia(w http.ResponseWriter, r *http.Request, id openapi_types.UUID)
 	// Read the operational overview
 	// (GET /api/v1/overview)
 	GetOverview(w http.ResponseWriter, r *http.Request)
@@ -144,6 +247,9 @@ type ServerInterface interface {
 	// Replace the complete farm state
 	// (PUT /api/v1/state)
 	ReplaceFarmState(w http.ResponseWriter, r *http.Request, params ReplaceFarmStateParams)
+	// Subscribe to live change hints
+	// (GET /api/v1/stream)
+	StreamChanges(w http.ResponseWriter, r *http.Request)
 	// List zones
 	// (GET /api/v1/zones)
 	ListZones(w http.ResponseWriter, r *http.Request)
@@ -167,6 +273,12 @@ type MiddlewareFunc func(http.Handler) http.Handler
 // ListAlerts operation middleware
 func (siw *ServerInterfaceWrapper) ListAlerts(w http.ResponseWriter, r *http.Request) {
 
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListAlerts(w, r)
 	}))
@@ -181,6 +293,12 @@ func (siw *ServerInterfaceWrapper) ListAlerts(w http.ResponseWriter, r *http.Req
 // ListChannels operation middleware
 func (siw *ServerInterfaceWrapper) ListChannels(w http.ResponseWriter, r *http.Request) {
 
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListChannels(w, r)
 	}))
@@ -194,6 +312,12 @@ func (siw *ServerInterfaceWrapper) ListChannels(w http.ResponseWriter, r *http.R
 
 // ListCommands operation middleware
 func (siw *ServerInterfaceWrapper) ListCommands(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListCommands(w, r)
@@ -210,6 +334,12 @@ func (siw *ServerInterfaceWrapper) ListCommands(w http.ResponseWriter, r *http.R
 func (siw *ServerInterfaceWrapper) CreateCommand(w http.ResponseWriter, r *http.Request) {
 
 	var err error
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
 	var params CreateCommandParams
@@ -253,6 +383,12 @@ func (siw *ServerInterfaceWrapper) CreateCommand(w http.ResponseWriter, r *http.
 // ListDevices operation middleware
 func (siw *ServerInterfaceWrapper) ListDevices(w http.ResponseWriter, r *http.Request) {
 
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListDevices(w, r)
 	}))
@@ -266,6 +402,12 @@ func (siw *ServerInterfaceWrapper) ListDevices(w http.ResponseWriter, r *http.Re
 
 // ListEvents operation middleware
 func (siw *ServerInterfaceWrapper) ListEvents(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListEvents(w, r)
@@ -281,6 +423,12 @@ func (siw *ServerInterfaceWrapper) ListEvents(w http.ResponseWriter, r *http.Req
 // ListFacilities operation middleware
 func (siw *ServerInterfaceWrapper) ListFacilities(w http.ResponseWriter, r *http.Request) {
 
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListFacilities(w, r)
 	}))
@@ -294,6 +442,12 @@ func (siw *ServerInterfaceWrapper) ListFacilities(w http.ResponseWriter, r *http
 
 // ListGrowCycles operation middleware
 func (siw *ServerInterfaceWrapper) ListGrowCycles(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListGrowCycles(w, r)
@@ -309,6 +463,12 @@ func (siw *ServerInterfaceWrapper) ListGrowCycles(w http.ResponseWriter, r *http
 // ListMeasurements operation middleware
 func (siw *ServerInterfaceWrapper) ListMeasurements(w http.ResponseWriter, r *http.Request) {
 
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListMeasurements(w, r)
 	}))
@@ -320,8 +480,157 @@ func (siw *ServerInterfaceWrapper) ListMeasurements(w http.ResponseWriter, r *ht
 	handler.ServeHTTP(w, r)
 }
 
+// GetMeasurementHistory operation middleware
+func (siw *ServerInterfaceWrapper) GetMeasurementHistory(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetMeasurementHistoryParams
+
+	// ------------- Required query parameter "channelId" -------------
+
+	if paramValue := r.URL.Query().Get("channelId"); paramValue != "" {
+
+	} else {
+		siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "channelId"})
+		return
+	}
+
+	err = runtime.BindQueryParameter("form", true, true, "channelId", r.URL.Query(), &params.ChannelId)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "channelId", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "from" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "from", r.URL.Query(), &params.From)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "from", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "to" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "to", r.URL.Query(), &params.To)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "to", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "limit", r.URL.Query(), &params.Limit)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "bucketSeconds" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "bucketSeconds", r.URL.Query(), &params.BucketSeconds)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "bucketSeconds", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetMeasurementHistory(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListLatestMeasurements operation middleware
+func (siw *ServerInterfaceWrapper) ListLatestMeasurements(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListLatestMeasurements(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UploadMedia operation middleware
+func (siw *ServerInterfaceWrapper) UploadMedia(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UploadMedia(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DownloadMedia operation middleware
+func (siw *ServerInterfaceWrapper) DownloadMedia(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DownloadMedia(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetOverview operation middleware
 func (siw *ServerInterfaceWrapper) GetOverview(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetOverview(w, r)
@@ -337,6 +646,12 @@ func (siw *ServerInterfaceWrapper) GetOverview(w http.ResponseWriter, r *http.Re
 // ListReservoirs operation middleware
 func (siw *ServerInterfaceWrapper) ListReservoirs(w http.ResponseWriter, r *http.Request) {
 
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListReservoirs(w, r)
 	}))
@@ -350,6 +665,12 @@ func (siw *ServerInterfaceWrapper) ListReservoirs(w http.ResponseWriter, r *http
 
 // GetFarmState operation middleware
 func (siw *ServerInterfaceWrapper) GetFarmState(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetFarmState(w, r)
@@ -366,6 +687,12 @@ func (siw *ServerInterfaceWrapper) GetFarmState(w http.ResponseWriter, r *http.R
 func (siw *ServerInterfaceWrapper) ReplaceFarmState(w http.ResponseWriter, r *http.Request) {
 
 	var err error
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
 	var params ReplaceFarmStateParams
@@ -402,8 +729,34 @@ func (siw *ServerInterfaceWrapper) ReplaceFarmState(w http.ResponseWriter, r *ht
 	handler.ServeHTTP(w, r)
 }
 
+// StreamChanges operation middleware
+func (siw *ServerInterfaceWrapper) StreamChanges(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StreamChanges(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListZones operation middleware
 func (siw *ServerInterfaceWrapper) ListZones(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListZones(w, r)
@@ -573,10 +926,15 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("GET "+options.BaseURL+"/api/v1/facilities", wrapper.ListFacilities)
 	m.HandleFunc("GET "+options.BaseURL+"/api/v1/grow-cycles", wrapper.ListGrowCycles)
 	m.HandleFunc("GET "+options.BaseURL+"/api/v1/measurements", wrapper.ListMeasurements)
+	m.HandleFunc("GET "+options.BaseURL+"/api/v1/measurements/history", wrapper.GetMeasurementHistory)
+	m.HandleFunc("GET "+options.BaseURL+"/api/v1/measurements/latest", wrapper.ListLatestMeasurements)
+	m.HandleFunc("POST "+options.BaseURL+"/api/v1/media", wrapper.UploadMedia)
+	m.HandleFunc("GET "+options.BaseURL+"/api/v1/media/{id}", wrapper.DownloadMedia)
 	m.HandleFunc("GET "+options.BaseURL+"/api/v1/overview", wrapper.GetOverview)
 	m.HandleFunc("GET "+options.BaseURL+"/api/v1/reservoirs", wrapper.ListReservoirs)
 	m.HandleFunc("GET "+options.BaseURL+"/api/v1/state", wrapper.GetFarmState)
 	m.HandleFunc("PUT "+options.BaseURL+"/api/v1/state", wrapper.ReplaceFarmState)
+	m.HandleFunc("GET "+options.BaseURL+"/api/v1/stream", wrapper.StreamChanges)
 	m.HandleFunc("GET "+options.BaseURL+"/api/v1/zones", wrapper.ListZones)
 	m.HandleFunc("GET "+options.BaseURL+"/health/live", wrapper.GetLiveness)
 	m.HandleFunc("GET "+options.BaseURL+"/health/ready", wrapper.GetReadiness)

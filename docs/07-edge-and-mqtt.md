@@ -19,13 +19,26 @@ Prefer stable UUID/device identifiers in protocol topics and human-readable alia
 Suggested pattern:
 
 ```text
-grownerve/v1/devices/{deviceId}/telemetry
-grownerve/v1/devices/{deviceId}/state
-grownerve/v1/devices/{deviceId}/health
-grownerve/v1/devices/{deviceId}/commands
-grownerve/v1/devices/{deviceId}/acks
-grownerve/v1/devices/{deviceId}/config
+grownerve/v1/devices/{deviceId}/telemetry     device -> server
+grownerve/v1/devices/{deviceId}/state         device -> server
+grownerve/v1/devices/{deviceId}/health        device -> server
+grownerve/v1/devices/{deviceId}/acks          device -> server
+grownerve/v1/devices/{deviceId}/config/ack    device -> server
+grownerve/v1/devices/{deviceId}/commands      server -> device
+grownerve/v1/devices/{deviceId}/config        server -> device, retained
 ```
+
+The direction column is the ACL. `deployments/mosquitto/acl.example` grants each
+controller write access to its own device-to-server topics and read access to its
+own server-to-device topics, and nothing else, so a compromised controller can
+neither publish telemetry attributed to another device nor read another device's
+commands.
+
+`config` is the one retained topic. Retention is what lets a controller that
+reboots during a server outage recover its schedules from the broker instead of
+waiting for a server that may not come back. Everything else is transient: a
+retained command would be re-delivered on every reconnect, which is exactly the
+duplicate actuation the command identity and expiry exist to prevent.
 
 Avoid one MQTT topic per measured scalar if that creates excessive subscription/configuration complexity. A device may publish compact batches with channel IDs.
 
@@ -216,3 +229,71 @@ A software device simulator is a first-class development tool. It should:
 - simulate stale values and command rejection
 
 This enables backend/UI development before hardware is connected and enables CI coverage of protocol behavior.
+
+## Edge configuration envelope
+
+Published retained by the server whenever a device's desired configuration
+version differs from the version it reports as active.
+
+```json
+{
+  "protocolVersion": 1,
+  "deviceId": "...",
+  "configVersion": "pilot-v3",
+  "issuedAt": "2026-09-01T09:00:00Z",
+  "config": {
+    "photoperiod": {"onHour": 6, "onMinute": 0, "offHour": 22, "offMinute": 0, "channelId": "..."},
+    "fanMinimumPercent": 30,
+    "airPumpAlwaysOn": true,
+    "safeOutputs": {"<lightChannelId>": 0, "<fanChannelId>": 30, "<airPumpChannelId>": 100},
+    "telemetryIntervalSeconds": 10,
+    "commandTimeoutSeconds": 300
+  }
+}
+```
+
+Only behaviour a controller can run alone belongs here. Anything needing server
+judgement is deliberately absent, because a controller must never be left
+half-autonomous.
+
+`safeOutputs` is the value each output falls back to when nothing else applies.
+For aeration that value is *running*: "off" is not a safe default for a
+deep-water crop.
+
+### Configuration acknowledgement
+
+```json
+{
+  "protocolVersion": 1,
+  "deviceId": "...",
+  "configVersion": "pilot-v3",
+  "accepted": true,
+  "acknowledgedAt": "2026-09-01T09:00:02Z"
+}
+```
+
+A controller that rejects a configuration keeps running the last one it accepted
+and reports `accepted: false` with a reason. The server tracks adoption by the
+version the device reports in its health messages, not by the version it sent, so
+a configuration that never reached the hardware is visible as such rather than
+assumed applied.
+
+## Output precedence
+
+Every output is resolved in this fixed order, on the controller, every cycle:
+
+```text
+hardware interlock
+local safety limit
+emergency stop
+manual override (until it expires)
+automation
+essential schedule
+default safe value
+```
+
+The order is implemented twice on purpose: `internal/edge` in Go, which CI
+exercises, and `firmware/esp32/include/edge_policy.h`, which drives the relays.
+See ADR-036. An override is additionally bounded by the controller's own
+`commandTimeoutSeconds`, so a server that disappears mid-override cannot latch an
+output indefinitely.

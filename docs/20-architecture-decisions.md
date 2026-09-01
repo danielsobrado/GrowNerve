@@ -189,3 +189,94 @@ Browser simulator acknowledgements are explicitly identified as simulated.
 **Decision:** cache the static application shell and versioned 3D assets for offline reopening while keeping mutable farm data in IndexedDB.
 
 **Why:** this makes the static deployment genuinely local-first without mixing service-worker cache with application records.
+
+## ADR-031 — Farm state is compare-and-swap, not read-compare-write
+
+**Decision:** the farm document carries a version, `Save` is a conditional
+update on that version, and the ETag a client echoes in `If-Match` is that same
+version. Every read-modify-write goes through `farm.Mutate`, which retries with
+jittered backoff on conflict.
+
+**Why:** the previous design loaded the state, compared a content hash, and then
+saved — three separate steps with no atomicity. Under fifty concurrent
+ETag-guarded writers, six survived and forty-four were silently lost while their
+clients were told they had succeeded. Optimistic concurrency that is not atomic
+is not concurrency control. The jitter matters as much as the retry: writers
+that collide once collide again if they retry in lockstep.
+
+## ADR-032 — Telemetry is relational; configuration stays a document
+
+**Decision:** measurements are stored append-only in their own tables with a
+latest-value projection. Facilities, zones, devices, channels, recipes, alerts,
+and commands remain one versioned JSON document.
+
+**Why:** the two data classes have opposite shapes. Telemetry is high-volume,
+append-only, and queried by time range; rewriting the whole farm on every sample
+made an operator's edit race a sensor on every save and put unbounded data in a
+document that has to be read whole. Configuration is low-volume, edited by
+people, and benefits from whole-document consistency — splitting it across
+forty-odd tables would buy nothing at the documented V0 scale and cost a large
+mapping layer.
+
+The compatibility projection keeps the contract intact: `GET /api/v1/state`
+merges a bounded recent window of measurements into the document, and
+`PUT /api/v1/state` strips them back out, adopting any submitted history into
+the measurement store so a browser-to-server migration does not lose it.
+
+This is a deliberate boundary, not a permanent one. Per-resource endpoints can
+replace whole-document writes without changing the UI contract when editing
+concurrency becomes the constraint.
+
+## ADR-033 — Live updates carry hints, never data
+
+**Decision:** the server-sent-event stream emits `{"topic":"..."}` envelopes. A
+client re-reads through the normal authorized endpoints.
+
+**Why:** pushing farm data down the stream would bypass the authorization
+applied to those endpoints and duplicate the projection logic in a second place.
+A hint is also cheap enough to broadcast to every subscriber without regard for
+what each is permitted to see.
+
+## ADR-034 — Authorization and safety are separate checks
+
+**Decision:** a command passes an authorization check based on the caller's
+role, then a safety check based on channel limits, device liveness, expiry, and
+interlocks. Neither substitutes for the other, and an administrator cannot
+override an interlock.
+
+**Why:** they answer different questions. "May this person ask for this?" is a
+policy decision that changes with staffing. "Is this safe to do right now?" is a
+physical one that does not care who is asking.
+
+## ADR-035 — Accepted commands are queued, never dropped
+
+**Decision:** a command is persisted before publication. If the broker is
+unreachable at that moment, the message goes to the outbox and a worker retries
+it with a bounded attempt count.
+
+**Why:** the operator has already been told the command was accepted. Losing it
+because a broker restarted turns a transient fault into a silent one. The
+attempt bound exists so a permanently bad message parks rather than blocking
+everything behind it.
+
+## ADR-036 — The edge precedence engine exists twice, deliberately
+
+**Decision:** `internal/edge` in Go and `firmware/esp32/include/edge_policy.h`
+in C++ implement the same resolution order. The Go copy is exercised in CI; the
+C++ copy drives the relays.
+
+**Why:** the alternative is a controller whose precedence logic is only ever
+tested on a bench. Keeping an executable copy in the server repository is what
+lets the server-loss behaviour, override expiry, emergency latching, and
+midnight-crossing photoperiods be asserted automatically. The duplication is
+real and is called out in both files: they must be changed together.
+
+## ADR-037 — Media is typed by content, not by filename
+
+**Decision:** uploads are accepted only if their sniffed content type is in an
+image allow-list, are stored under a generated key, and are served as
+attachments with sniffing disabled.
+
+**Why:** a filename and a declared content type are both attacker-controlled.
+HTML and SVG can carry script, and this store's contents are served back to
+browsers, so the check has to be on the bytes.

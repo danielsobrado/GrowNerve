@@ -1,4 +1,4 @@
-.PHONY: up down migrate gen test test-all run-api run-frontend run-browser reset
+.PHONY: up down migrate gen test test-integration test-all run-api run-frontend run-browser reset firmware
 up:
 	docker compose up -d --build --wait
 down:
@@ -12,6 +12,12 @@ gen:
 test:
 	go test ./...
 	cd frontend && npm test
+test-integration:
+	docker compose up -d postgres mosquitto
+	GROWNERVE_TEST_DATABASE_URL="postgresql://postgres:postgres@127.0.0.1:5432/grownerve?sslmode=disable" \
+	GROWNERVE_TEST_MQTT_BROKER="tcp://127.0.0.1:1883" \
+	MIGRATION_DATABASE_URL="postgresql://postgres:postgres@127.0.0.1:5432/grownerve?sslmode=disable" \
+	sh -c 'go run ./cmd/migrate up && go test -race ./...'
 test-all:
 	go test -race -cover ./...
 	go vet ./...
@@ -25,3 +31,5 @@ run-browser:
 reset:
 	docker compose down --volumes
 	docker compose up -d --build --wait
+firmware:
+	cd firmware/esp32 && pio run

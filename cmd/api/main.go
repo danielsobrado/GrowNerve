@@ -14,11 +14,18 @@ import (
 	"time"
 
 	"github.com/jdanielsobrado/grownerve/internal/farm"
+	"github.com/jdanielsobrado/grownerve/internal/media"
+	"github.com/jdanielsobrado/grownerve/internal/platform/audit"
+	"github.com/jdanielsobrado/grownerve/internal/platform/auth"
 	"github.com/jdanielsobrado/grownerve/internal/platform/config"
 	"github.com/jdanielsobrado/grownerve/internal/platform/database"
 	"github.com/jdanielsobrado/grownerve/internal/platform/httpx"
 	platformmiddleware "github.com/jdanielsobrado/grownerve/internal/platform/middleware"
 	mqttbridge "github.com/jdanielsobrado/grownerve/internal/platform/mqtt"
+	"github.com/jdanielsobrado/grownerve/internal/platform/outbox"
+	"github.com/jdanielsobrado/grownerve/internal/registry"
+	"github.com/jdanielsobrado/grownerve/internal/runtime"
+	"github.com/jdanielsobrado/grownerve/internal/telemetry"
 )
 
 var version = "dev"
@@ -40,21 +47,51 @@ func run() error {
 		return fmt.Errorf("load configuration: %w", err)
 	}
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+
+	authenticator, err := buildAuthenticator(cfg)
+	if err != nil {
+		return fmt.Errorf("configure authentication: %w", err)
+	}
+	logger.Info("authentication_configured", "mode", authenticator.Mode(), "env", cfg.Env)
+
 	pool, err := database.Open(context.Background(), os.Getenv(cfg.Postgres.URLEnv))
 	if err != nil {
 		return err
 	}
 	defer pool.Close()
+
+	runtimeContext, cancelRuntime := context.WithCancel(context.Background())
+	defer cancelRuntime()
+
+	stateStore := farm.NewPostgresStore(pool)
+	samples := telemetry.NewPostgresStore(pool)
+	queue := outbox.NewPostgresStore(pool)
+	recorder := audit.NewRecorder(pool, logger)
+	recorder.Start(runtimeContext)
+
+	mediaStore, err := media.NewFilesystemStore(cfg.Media.Path, cfg.Media.MaximumBytes)
+	if err != nil {
+		return fmt.Errorf("configure media storage: %w", err)
+	}
+
+	events := httpx.NewEventBroker()
+	bridge := mqttbridge.NewBridge(cfg.MQTT.Broker, cfg.MQTT.ClientID, stateStore, logger,
+		mqttbridge.WithTelemetryStore(samples), mqttbridge.WithNotifier(events),
+		mqttbridge.WithCredentials(os.Getenv(cfg.MQTT.UsernameEnv), os.Getenv(cfg.MQTT.PasswordEnv)))
+	bridge.Start(runtimeContext)
+
+	publisher := farm.NewDurablePublisher(bridge, queue, logger)
+	supervisor := runtime.New(stateStore, samples, logger, runtimeConfig(cfg),
+		runtime.WithNotifier(events), runtime.WithConfigPublisher(bridge),
+		runtime.WithAuditRecorder(recorder), runtime.WithOutbox(farm.NewOutboxWorker(queue, bridge, logger)))
+	supervisor.Start(runtimeContext)
+
 	health := httpx.NewHealthHandler(func() error {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		return pool.Ping(ctx)
 	})
-	runtimeContext, cancelRuntime := context.WithCancel(context.Background())
-	defer cancelRuntime()
-	stateStore := farm.NewPostgresStore(pool)
-	bridge := mqttbridge.NewBridge(cfg.MQTT.Broker, cfg.MQTT.ClientID, stateStore, logger)
-	bridge.Start(runtimeContext)
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health/live", health.Live)
 	mux.HandleFunc("GET /health/ready", health.Ready)
@@ -62,14 +99,36 @@ func run() error {
 		writer.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(writer).Encode(map[string]string{"version": version})
 	})
-	mux.Handle("/api/v1/", farm.NewHandler(stateStore, farm.WithCommandPublisher(bridge)))
-	handler := platformmiddleware.Chain(mux, platformmiddleware.Options{AllowedOrigins: cfg.Server.CORSAllowedOrigins, Logger: logger})
-	server := &http.Server{Addr: cfg.Server.Address, Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 35 * time.Second, WriteTimeout: 35 * time.Second, IdleTimeout: 90 * time.Second}
+	mux.HandleFunc("GET /api/v1/stream", events.Stream)
+	mux.Handle("/api/v1/", farm.NewHandler(stateStore,
+		farm.WithCommandPublisher(publisher), farm.WithTelemetry(samples), farm.WithMediaStore(mediaStore),
+		farm.WithRegistry(registry.NewPostgresProjector(pool)),
+		farm.WithNotifier(events), farm.WithAuthorizer(farm.RoleAuthorizer{}),
+		farm.WithAuditRecorder(recorder), farm.WithLogger(logger)))
+
+	// Authentication wraps everything except the probes, so no API path can be
+	// reached without an identity having been established.
+	authenticated := auth.Middleware(authenticator, []string{"/health", "/version"}, logger)(mux)
+	handler := platformmiddleware.Chain(authenticated, platformmiddleware.Options{
+		AllowedOrigins: cfg.Server.CORSAllowedOrigins,
+		Logger:         logger,
+		ReadLimit:      platformmiddleware.RateLimit{Rate: cfg.Server.RateLimit.ReadPerSecond, Burst: cfg.Server.RateLimit.ReadBurst},
+		WriteLimit:     platformmiddleware.RateLimit{Rate: cfg.Server.RateLimit.WritePerSecond, Burst: cfg.Server.RateLimit.WriteBurst},
+	})
+
+	server := &http.Server{
+		Addr: cfg.Server.Address, Handler: handler,
+		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 35 * time.Second,
+		// The event stream is long-lived, so a global write timeout would cut it.
+		// Per-request deadlines guard the rest instead.
+		WriteTimeout: 0, IdleTimeout: 90 * time.Second,
+	}
 	serverErrors := make(chan error, 1)
 	go func() {
 		logger.Info("api_started", "address", cfg.Server.Address, "version", version)
 		serverErrors <- server.ListenAndServe()
 	}()
+
 	signalContext, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	select {
@@ -79,7 +138,55 @@ func run() error {
 		}
 	case <-signalContext.Done():
 	}
+
 	shutdownContext, cancel := context.WithTimeout(context.Background(), cfg.Server.ShutdownTimeout)
 	defer cancel()
-	return server.Shutdown(shutdownContext)
+	shutdownErr := server.Shutdown(shutdownContext)
+	cancelRuntime()
+	// The audit queue is drained before exit so actions accepted during the last
+	// moments of the process are not lost.
+	recorder.Wait()
+	return shutdownErr
+}
+
+func runtimeConfig(cfg config.Config) runtime.Config {
+	return runtime.Config{
+		CommandSweepInterval: cfg.Runtime.CommandSweepInterval,
+		AlertInterval:        cfg.Runtime.AlertInterval,
+		RetentionInterval:    cfg.Runtime.RetentionInterval,
+		ConfigSyncInterval:   cfg.Runtime.ConfigSyncInterval,
+		OutboxInterval:       10 * time.Second,
+		TelemetryRetention:   cfg.Telemetry.Retention,
+		DeviceOfflineAfter:   cfg.Runtime.DeviceOfflineAfter,
+	}
+}
+
+func buildAuthenticator(cfg config.Config) (auth.Authenticator, error) {
+	switch cfg.Auth.Mode {
+	case config.ModeLocal:
+		return auth.NewLocalAuthenticator(os.Getenv(cfg.Auth.LocalAccountsEnv))
+	case config.ModeOIDC:
+		mapping := map[string]auth.Role{}
+		for claim, role := range cfg.Auth.OIDC.RoleMapping {
+			parsed, err := auth.ParseRole(role)
+			if err != nil {
+				return nil, fmt.Errorf("auth.oidc.role_mapping[%s]: %w", claim, err)
+			}
+			mapping[claim] = parsed
+		}
+		var fallback auth.Role
+		if cfg.Auth.OIDC.DefaultRole != "" {
+			parsed, err := auth.ParseRole(cfg.Auth.OIDC.DefaultRole)
+			if err != nil {
+				return nil, fmt.Errorf("auth.oidc.default_role: %w", err)
+			}
+			fallback = parsed
+		}
+		return auth.NewOIDCAuthenticator(auth.OIDCConfig{
+			Issuer: cfg.Auth.OIDC.Issuer, Audience: cfg.Auth.OIDC.Audience,
+			RoleClaim: cfg.Auth.OIDC.RoleClaim, RoleMapping: mapping, DefaultRole: fallback,
+		}, nil)
+	default:
+		return auth.DevAuthenticator{}, nil
+	}
 }

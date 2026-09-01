@@ -13,3 +13,7 @@ frontend/*.tsbuildinfo
 frontend/vite.config.js
 frontend/vite.config.d.ts
 frontend/dev-dist/
+
+# Firmware credentials are provisioned per controller and never committed.
+firmware/esp32/include/secrets.h
+firmware/esp32/.pio/

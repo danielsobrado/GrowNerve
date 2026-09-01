@@ -24,6 +24,20 @@ tasks:
     cmds:
       - go test ./...
       - { cmd: npm test, dir: frontend }
+  test:integration:
+    desc: Run tests against a real PostgreSQL and MQTT broker
+    env:
+      GROWNERVE_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/grownerve?sslmode=disable
+      GROWNERVE_TEST_MQTT_BROKER: tcp://127.0.0.1:1883
+      MIGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/grownerve?sslmode=disable
+    cmds:
+      - docker compose up -d postgres mosquitto
+      - go run ./cmd/migrate up
+      - go test -race ./...
+  firmware:build:
+    desc: Build the ESP32 reference firmware
+    dir: firmware/esp32
+    cmds: [pio run]
   test:all:
     desc: Run all CI-equivalent local quality gates
     cmds:

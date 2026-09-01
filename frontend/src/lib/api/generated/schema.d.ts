@@ -182,8 +182,102 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List measurements */
+        /**
+         * List measurements
+         * @description The newest measurement per channel. Full history is served by /api/v1/measurements/history.
+         */
         get: operations["listMeasurements"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/measurements/latest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read the newest measurement per channel */
+        get: operations["listLatestMeasurements"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/measurements/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read bounded measurement history for one channel
+         * @description Every read is bounded. Omitting from and to reads the last 24 hours, and limit is clamped to the server maximum. Supplying bucketSeconds returns server-side aggregates instead of raw samples.
+         */
+        get: operations["getMeasurementHistory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Subscribe to live change hints
+         * @description A server-sent-event stream of small invalidation envelopes. It carries no farm data: a client is told which topic changed and re-reads it through the normal authorized endpoints.
+         */
+        get: operations["streamChanges"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/media": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Upload an observation photograph */
+        post: operations["uploadMedia"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/media/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Download a stored photograph */
+        get: operations["downloadMedia"];
         put?: never;
         post?: never;
         delete?: never;
@@ -335,6 +429,56 @@ export interface components {
                 [key: string]: unknown;
             }[];
         };
+        Measurement: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            channel_id: string;
+            /** Format: date-time */
+            observed_at: string;
+            /** Format: date-time */
+            received_at?: string;
+            /** Format: int64 */
+            sequence?: number;
+            value: number;
+            unit: string;
+            /** @enum {string} */
+            quality: "good" | "suspect" | "stale" | "calibrating" | "fault" | "unknown";
+            /** Format: uuid */
+            source_device_id?: string;
+        };
+        MeasurementPage: {
+            /** Format: uuid */
+            channelId: string;
+            measurements: components["schemas"]["Measurement"][];
+        };
+        Bucket: {
+            /** Format: date-time */
+            started_at: string;
+            average: number;
+            minimum: number;
+            maximum: number;
+            /** Format: int64 */
+            samples: number;
+        };
+        BucketPage: {
+            /** Format: uuid */
+            channelId: string;
+            bucketSeconds: number;
+            buckets: components["schemas"]["Bucket"][];
+        };
+        MediaObject: {
+            /** Format: uuid */
+            id: string;
+            filename: string;
+            /** @enum {string} */
+            mime_type: "image/jpeg" | "image/png" | "image/webp" | "image/gif";
+            /** Format: int64 */
+            size_bytes: number;
+            sha256: string;
+            /** Format: date-time */
+            created_at: string;
+        };
         Problem: {
             /** Format: uri */
             type: string;
@@ -459,12 +603,26 @@ export interface operations {
             /** @description Farm state saved. */
             204: {
                 headers: {
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content?: never;
             };
             400: components["responses"]["Problem"];
-            409: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            /** @description The state changed since it was read; reload before saving. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            413: components["responses"]["Problem"];
+            415: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
         };
     };
     getOverview: {
@@ -626,17 +784,136 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Bounded measurement data from the compatibility state */
+            /** @description Latest measurement per channel */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
+                    "application/json": components["schemas"]["Measurement"][];
                 };
             };
+        };
+    };
+    listLatestMeasurements: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Latest measurement per channel */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Measurement"][];
+                };
+            };
+        };
+    };
+    getMeasurementHistory: {
+        parameters: {
+            query: {
+                channelId: string;
+                from?: string;
+                to?: string;
+                limit?: number;
+                bucketSeconds?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Raw samples, or aggregates when bucketSeconds is supplied. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeasurementPage"] | components["schemas"]["BucketPage"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    streamChanges: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description An open event stream. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
+                };
+            };
+        };
+    };
+    uploadMedia: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /** Format: binary */
+                    file: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Stored object metadata */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MediaObject"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            413: components["responses"]["Problem"];
+            415: components["responses"]["Problem"];
+        };
+    };
+    downloadMedia: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The stored image. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": string;
+                };
+            };
+            404: components["responses"]["Problem"];
         };
     };
     listEvents: {
@@ -727,6 +1004,17 @@ export interface operations {
             };
         };
         responses: {
+            /** @description A retry of an already-accepted command; the original record is returned */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
             /** @description Command persisted and accepted for delivery */
             202: {
                 headers: {
@@ -739,7 +1027,20 @@ export interface operations {
                 };
             };
             400: components["responses"]["Problem"];
-            422: components["responses"]["Problem"];
+            401: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            /** @description The command was refused by a safety interlock. Authorization and safety are separate checks. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            429: components["responses"]["Problem"];
         };
     };
 }

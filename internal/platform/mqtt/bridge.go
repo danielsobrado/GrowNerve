@@ -7,30 +7,63 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"sync"
 	"time"
 
 	paho "github.com/eclipse/paho.mqtt.golang"
-	"github.com/google/uuid"
 	"github.com/jdanielsobrado/grownerve/internal/deviceprotocol"
 	"github.com/jdanielsobrado/grownerve/internal/farm"
+	"github.com/jdanielsobrado/grownerve/internal/telemetry"
 )
 
+// Bridge moves messages between the broker and the server's stores. Telemetry
+// is appended to the measurement store; only the small, low-frequency facts
+// (device liveness, command results) touch the farm document.
 type Bridge struct {
-	client paho.Client
-	store  farm.Store
-	logger *slog.Logger
-	mu     sync.Mutex
+	client    paho.Client
+	store     farm.Store
+	telemetry telemetry.Store
+	notifier  farm.Notifier
+	logger    *slog.Logger
+	username  string
+	password  string
 }
 
-func NewBridge(broker, clientID string, store farm.Store, logger *slog.Logger) *Bridge {
+// Option configures optional bridge collaborators.
+type Option func(*Bridge)
+
+// WithTelemetryStore directs measurements to relational storage.
+func WithTelemetryStore(store telemetry.Store) Option {
+	return func(bridge *Bridge) { bridge.telemetry = store }
+}
+
+// WithCredentials supplies broker credentials. Empty values leave the client
+// anonymous, which is only appropriate on a development broker.
+func WithCredentials(username, password string) Option {
+	return func(bridge *Bridge) { bridge.username, bridge.password = username, password }
+}
+
+// WithNotifier publishes change hints so live-update clients can refresh.
+func WithNotifier(notifier farm.Notifier) Option {
+	return func(bridge *Bridge) { bridge.notifier = notifier }
+}
+
+func NewBridge(broker, clientID string, store farm.Store, logger *slog.Logger, options ...Option) *Bridge {
 	bridge := &Bridge{store: store, logger: logger}
-	options := paho.NewClientOptions().AddBroker(broker).SetClientID(clientID).SetAutoReconnect(true).SetConnectRetry(true).SetConnectRetryInterval(5 * time.Second).SetOrderMatters(false)
-	options.SetOnConnectHandler(func(client paho.Client) {
+	for _, option := range options {
+		option(bridge)
+	}
+	if bridge.telemetry == nil {
+		bridge.telemetry = telemetry.NewMemoryStore(0)
+	}
+	paho.ERROR = slog.NewLogLogger(logger.Handler(), slog.LevelError)
+	clientOptions := paho.NewClientOptions().AddBroker(broker).SetClientID(clientID).
+		SetAutoReconnect(true).SetConnectRetry(true).SetConnectRetryInterval(5 * time.Second).SetOrderMatters(false)
+	clientOptions.SetOnConnectHandler(func(client paho.Client) {
 		for topic, handler := range map[string]paho.MessageHandler{
-			"grownerve/v1/devices/+/telemetry": bridge.handleTelemetry,
-			"grownerve/v1/devices/+/acks":      bridge.handleAcknowledgement,
-			"grownerve/v1/devices/+/health":    bridge.handleHealth,
+			"grownerve/v1/devices/+/telemetry":  bridge.handleTelemetry,
+			"grownerve/v1/devices/+/acks":       bridge.handleAcknowledgement,
+			"grownerve/v1/devices/+/health":     bridge.handleHealth,
+			"grownerve/v1/devices/+/config/ack": bridge.handleConfigAcknowledgement,
 		} {
 			if token := client.Subscribe(topic, 1, handler); token.Wait() && token.Error() != nil {
 				logger.Error("mqtt_subscribe_failed", "topic", topic, "error", token.Error())
@@ -38,8 +71,11 @@ func NewBridge(broker, clientID string, store farm.Store, logger *slog.Logger) *
 		}
 		logger.Info("mqtt_connected", "broker", broker)
 	})
-	options.SetConnectionLostHandler(func(_ paho.Client, err error) { logger.Warn("mqtt_connection_lost", "error", err) })
-	bridge.client = paho.NewClient(options)
+	if bridge.username != "" {
+		clientOptions.SetUsername(bridge.username).SetPassword(bridge.password)
+	}
+	clientOptions.SetConnectionLostHandler(func(_ paho.Client, err error) { logger.Warn("mqtt_connection_lost", "error", err) })
+	bridge.client = paho.NewClient(clientOptions)
 	return bridge
 }
 
@@ -61,10 +97,10 @@ func (bridge *Bridge) Start(ctx context.Context) {
 	}()
 }
 
+// Connected reports broker connectivity for readiness reporting.
+func (bridge *Bridge) Connected() bool { return bridge.client.IsConnected() }
+
 func (bridge *Bridge) PublishCommand(ctx context.Context, deviceID string, command deviceprotocol.Command) error {
-	if !bridge.client.IsConnected() {
-		return errors.New("MQTT broker is unavailable")
-	}
 	if err := command.Validate(time.Now().UTC()); err != nil {
 		return err
 	}
@@ -72,7 +108,27 @@ func (bridge *Bridge) PublishCommand(ctx context.Context, deviceID string, comma
 	if err != nil {
 		return err
 	}
-	token := bridge.client.Publish(fmt.Sprintf("grownerve/v1/devices/%s/commands", deviceID), 1, false, payload)
+	return bridge.publish(ctx, fmt.Sprintf("grownerve/v1/devices/%s/commands", deviceID), payload, false)
+}
+
+// PublishConfig delivers a retained edge configuration so a controller that
+// reconnects after a server outage recovers its schedules from the broker
+// without waiting for the server to come back.
+func (bridge *Bridge) PublishConfig(ctx context.Context, deviceID string, payload []byte) error {
+	return bridge.publish(ctx, fmt.Sprintf("grownerve/v1/devices/%s/config", deviceID), payload, true)
+}
+
+// PublishRaw publishes an already-encoded payload, which is what the outbox
+// worker replays after a broker outage.
+func (bridge *Bridge) PublishRaw(ctx context.Context, topic string, payload []byte) error {
+	return bridge.publish(ctx, topic, payload, false)
+}
+
+func (bridge *Bridge) publish(ctx context.Context, topic string, payload []byte, retained bool) error {
+	if !bridge.client.IsConnected() {
+		return errors.New("MQTT broker is unavailable")
+	}
+	token := bridge.client.Publish(topic, 1, retained, payload)
 	for !token.WaitTimeout(100 * time.Millisecond) {
 		select {
 		case <-ctx.Done():
@@ -83,6 +139,13 @@ func (bridge *Bridge) PublishCommand(ctx context.Context, deviceID string, comma
 	return token.Error()
 }
 
+func (bridge *Bridge) notify(topic string) {
+	if bridge.notifier != nil {
+		bridge.notifier.Notify(topic)
+	}
+}
+
+// stateDocument is the narrow view of the farm document the bridge maintains.
 type stateDocument struct {
 	Devices  []map[string]any `json:"devices"`
 	Channels []struct {
@@ -90,37 +153,40 @@ type stateDocument struct {
 		DeviceID string `json:"device_id"`
 		Unit     string `json:"unit"`
 	} `json:"channels"`
-	Measurements []json.RawMessage `json:"measurements"`
-	Commands     []map[string]any  `json:"commands"`
+	Commands []map[string]any `json:"commands"`
 }
 
+// mutate applies a compare-and-swap read-modify-write against the farm document.
+// The mutator can run more than once, so it must not carry state between calls.
 func (bridge *Bridge) mutate(mutator func(*stateDocument) error) {
-	bridge.mu.Lock()
-	defer bridge.mu.Unlock()
-	state, err := bridge.store.Load(context.Background())
-	if err != nil {
-		bridge.logger.Warn("mqtt_state_load_failed", "error", err)
-		return
-	}
-	var document stateDocument
-	if json.Unmarshal(state, &document) != nil {
+	err := farm.Mutate(context.Background(), bridge.store, func(state json.RawMessage) (json.RawMessage, error) {
+		var document stateDocument
+		if err := json.Unmarshal(state, &document); err != nil {
+			return nil, errInvalidState
+		}
+		if err := mutator(&document); err != nil {
+			return nil, err
+		}
+		var object map[string]json.RawMessage
+		if err := json.Unmarshal(state, &object); err != nil {
+			return nil, errInvalidState
+		}
+		object["devices"], _ = json.Marshal(document.Devices)
+		object["commands"], _ = json.Marshal(document.Commands)
+		return json.Marshal(object)
+	})
+	switch {
+	case err == nil:
+	case errors.Is(err, errInvalidState):
 		bridge.logger.Warn("mqtt_state_invalid")
-		return
-	}
-	if err := mutator(&document); err != nil {
+	case errors.Is(err, farm.ErrNotFound):
+		bridge.logger.Warn("mqtt_state_load_failed", "error", err)
+	default:
 		bridge.logger.Warn("mqtt_message_rejected", "reason", err)
-		return
-	}
-	var object map[string]json.RawMessage
-	_ = json.Unmarshal(state, &object)
-	object["devices"], _ = json.Marshal(document.Devices)
-	object["measurements"], _ = json.Marshal(document.Measurements)
-	object["commands"], _ = json.Marshal(document.Commands)
-	next, _ := json.Marshal(object)
-	if err := bridge.store.Save(context.Background(), next); err != nil {
-		bridge.logger.Error("mqtt_state_save_failed", "error", err)
 	}
 }
+
+var errInvalidState = errors.New("stored farm state is invalid")
 
 func (bridge *Bridge) handleTelemetry(_ paho.Client, message paho.Message) {
 	envelope, err := deviceprotocol.ParseTelemetry(message.Payload())
@@ -128,6 +194,15 @@ func (bridge *Bridge) handleTelemetry(_ paho.Client, message paho.Message) {
 		bridge.logger.Warn("mqtt_telemetry_invalid", "error", err)
 		return
 	}
+	// Resolve the device and channels against the configuration document first:
+	// an unknown or decommissioned device must not be able to write history.
+	//
+	// The envelope is all-or-nothing. Accepting the samples that resolved while
+	// rejecting the envelope would let a device widen its own reach by mixing one
+	// unknown channel into an otherwise valid batch, and would record history the
+	// operator was never told had been accepted.
+	var accepted []telemetry.Measurement
+	var resolved []telemetry.Measurement
 	bridge.mutate(func(document *stateDocument) error {
 		knownDevice := false
 		for _, device := range document.Devices {
@@ -141,6 +216,7 @@ func (bridge *Bridge) handleTelemetry(_ paho.Client, message paho.Message) {
 		if !knownDevice {
 			return errors.New("unknown_device")
 		}
+		resolved = resolved[:0]
 		for _, sample := range envelope.Samples {
 			knownChannel := false
 			for _, channel := range document.Channels {
@@ -155,14 +231,27 @@ func (bridge *Bridge) handleTelemetry(_ paho.Client, message paho.Message) {
 			if !knownChannel {
 				return errors.New("unknown_channel")
 			}
-			record, _ := json.Marshal(map[string]any{"id": uuid.NewString(), "channel_id": sample.ChannelID, "observed_at": envelope.ObservedAt, "received_at": time.Now().UTC(), "value": sample.Value, "unit": sample.Unit, "quality": sample.Quality, "sequence": envelope.Sequence, "source_device_id": envelope.DeviceID})
-			document.Measurements = append(document.Measurements, record)
+			sequence := int64(envelope.Sequence)
+			resolved = append(resolved, telemetry.Measurement{
+				ChannelID: sample.ChannelID, ObservedAt: envelope.ObservedAt, ReceivedAt: time.Now().UTC(),
+				Sequence: &sequence, Value: sample.Value, Unit: sample.Unit,
+				Quality: telemetry.Quality(sample.Quality), SourceDeviceID: envelope.DeviceID,
+			})
 		}
-		if len(document.Measurements) > 5000 {
-			document.Measurements = document.Measurements[len(document.Measurements)-5000:]
-		}
+		// Only a mutation that returns nil reaches this point, so the samples are
+		// promoted out of the retryable scratch slice exactly once the whole
+		// envelope has been accepted.
+		accepted = append(accepted[:0], resolved...)
 		return nil
 	})
+	if len(accepted) == 0 {
+		return
+	}
+	if _, err := bridge.telemetry.Append(context.Background(), accepted); err != nil {
+		bridge.logger.Error("telemetry_append_failed", "error", err, "device", envelope.DeviceID)
+		return
+	}
+	bridge.notify("measurements")
 }
 
 func (bridge *Bridge) handleAcknowledgement(_ paho.Client, message paho.Message) {
@@ -173,22 +262,29 @@ func (bridge *Bridge) handleAcknowledgement(_ paho.Client, message paho.Message)
 	}
 	bridge.mutate(func(document *stateDocument) error {
 		for _, command := range document.Commands {
-			if command["id"] == ack.CommandID {
-				switch ack.Result {
-				case "applied":
-					command["status"] = "applied"
-				case "accepted":
-					command["status"] = "acknowledged"
-				default:
-					command["status"] = "rejected"
-				}
-				command["reason_code"] = ack.ReasonCode
-				command["updated_at"] = ack.AcknowledgedAt
-				return nil
+			if command["id"] != ack.CommandID {
+				continue
 			}
+			// A terminal command is not reopened by a late or replayed
+			// acknowledgement.
+			if status, _ := command["status"].(string); status == "applied" || status == "rejected" || status == "timed_out" || status == "cancelled" {
+				return errors.New("command_already_final")
+			}
+			switch ack.Result {
+			case "applied":
+				command["status"] = "applied"
+			case "accepted":
+				command["status"] = "acknowledged"
+			default:
+				command["status"] = "rejected"
+			}
+			command["reason_code"] = ack.ReasonCode
+			command["updated_at"] = ack.AcknowledgedAt
+			return nil
 		}
 		return errors.New("unknown_command")
 	})
+	bridge.notify("commands")
 }
 
 func (bridge *Bridge) handleHealth(_ paho.Client, message paho.Message) {
@@ -210,4 +306,35 @@ func (bridge *Bridge) handleHealth(_ paho.Client, message paho.Message) {
 		}
 		return errors.New("unknown_device")
 	})
+	bridge.notify("devices")
+}
+
+// handleConfigAcknowledgement records which edge configuration a controller has
+// actually adopted, which is the only trustworthy signal that a schedule change
+// reached the hardware.
+func (bridge *Bridge) handleConfigAcknowledgement(_ paho.Client, message paho.Message) {
+	var ack struct {
+		ProtocolVersion int    `json:"protocolVersion"`
+		DeviceID        string `json:"deviceId"`
+		ConfigVersion   string `json:"configVersion"`
+		Accepted        bool   `json:"accepted"`
+		Detail          string `json:"detail"`
+	}
+	if json.Unmarshal(message.Payload(), &ack) != nil || ack.ProtocolVersion != deviceprotocol.Version || ack.DeviceID == "" {
+		bridge.logger.Warn("mqtt_config_ack_invalid")
+		return
+	}
+	bridge.mutate(func(document *stateDocument) error {
+		for _, device := range document.Devices {
+			if device["id"] == ack.DeviceID {
+				if ack.Accepted {
+					device["active_config_version"] = ack.ConfigVersion
+				}
+				device["last_config_result"] = map[string]any{"version": ack.ConfigVersion, "accepted": ack.Accepted, "detail": ack.Detail}
+				return nil
+			}
+		}
+		return errors.New("unknown_device")
+	})
+	bridge.notify("devices")
 }

@@ -1,0 +1,24 @@
+# Topic ACL. Each controller may publish only its own telemetry, health, and
+# acknowledgements, and may subscribe only to its own commands and config.
+# Provision one entry per device and one server account.
+#
+# Create the password file with:
+#   mosquitto_passwd -c passwords grownerve-server
+#   mosquitto_passwd    passwords device-<uuid>
+
+user grownerve-server
+topic readwrite grownerve/v1/devices/+/telemetry
+topic readwrite grownerve/v1/devices/+/health
+topic readwrite grownerve/v1/devices/+/acks
+topic readwrite grownerve/v1/devices/+/commands
+topic readwrite grownerve/v1/devices/+/config
+topic readwrite grownerve/v1/devices/+/config/ack
+
+# Repeat this block per controller, substituting the device identifier.
+user device-00000000-0000-0000-0000-000000000000
+topic write grownerve/v1/devices/00000000-0000-0000-0000-000000000000/telemetry
+topic write grownerve/v1/devices/00000000-0000-0000-0000-000000000000/health
+topic write grownerve/v1/devices/00000000-0000-0000-0000-000000000000/acks
+topic write grownerve/v1/devices/00000000-0000-0000-0000-000000000000/config/ack
+topic read  grownerve/v1/devices/00000000-0000-0000-0000-000000000000/commands
+topic read  grownerve/v1/devices/00000000-0000-0000-0000-000000000000/config

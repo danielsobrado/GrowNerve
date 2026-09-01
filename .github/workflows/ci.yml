@@ -95,14 +95,46 @@ jobs:
     env:
       MIGRATION_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/grownerve_test?sslmode=disable
       GROWNERVE_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/grownerve_test?sslmode=disable
+      # These two are what make the integration tests actually connect. Without
+      # them the suite silently skips every test that needs a real dependency.
+      GROWNERVE_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/grownerve_test?sslmode=disable
+      GROWNERVE_TEST_MQTT_BROKER: tcp://localhost:1883
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with: { go-version: "1.25.13", cache: true }
+      # The broker is started after checkout rather than as a service container,
+      # because it needs the repository's development configuration mounted.
+      - name: Start the test broker
+        run: |
+          docker run -d --name grownerve-test-broker -p 1883:1883 \
+            -v "$PWD/deployments/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro" \
+            eclipse-mosquitto:2.0
+          for attempt in $(seq 1 30); do
+            if docker exec grownerve-test-broker mosquitto_sub -h 127.0.0.1 -t '$SYS/broker/version' -C 1 -W 2 >/dev/null 2>&1; then
+              echo "broker ready"; exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::The test broker never became ready."; docker logs grownerve-test-broker; exit 1
       - name: Migrate up, down, up
         run: go run ./cmd/migrate up && go run ./cmd/migrate down && go run ./cmd/migrate up
-      - name: Integration tests
+      - name: Integration tests against PostgreSQL and the broker
         run: go test -race ./...
+      # A silently skipped integration test is worse than none, so the build
+      # fails if any of them opted out instead of running.
+      - name: Fail if the integration tests skipped instead of running
+        run: |
+          go test -count=1 -v \
+            -run "Postgres|RealBroker|Retained|UnknownDevice|LatestProjection|UnknownChannel|Acknowledgement" \
+            ./internal/farm/ ./internal/telemetry/ ./internal/platform/mqtt/ | tee integration.log
+          if grep -q -- "--- SKIP" integration.log; then
+            echo "::error::Integration tests skipped; the database or broker was not reachable."
+            exit 1
+          fi
+      - name: Stop the test broker
+        if: always()
+        run: docker rm -f grownerve-test-broker || true
 
   images:
     runs-on: ubuntu-latest

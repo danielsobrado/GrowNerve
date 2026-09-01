@@ -142,3 +142,48 @@ command rejected
 ```
 
 Do not collapse these into a generic red status dot.
+
+## What the server emits today
+
+### Structured logs
+
+Every request logs method, path, correlation ID, and duration as JSON. The
+correlation ID is taken from `X-Correlation-ID` when the client supplies a valid
+UUID and generated otherwise, and it is echoed back on the response, so a single
+operator action can be followed from the browser through the API and into the
+audit record.
+
+Named events worth alerting on in a log pipeline:
+
+```text
+command_timed_out          a command was never acknowledged before its expiry
+device_marked_offline      a heartbeat went stale
+command_queued_for_retry   the broker was unreachable when a command was accepted
+outbox_message_parked      a queued message exhausted its attempts
+telemetry_append_failed    accepted telemetry could not be persisted
+audit_queue_full           audit entries were dropped under load
+background_job_failed      a runtime job errored and will retry on its next tick
+http_rate_limited          a client exceeded its allowance
+authentication_failed      a credential was rejected
+```
+
+### Audit log
+
+Security-relevant actions are written to `audit_log` with actor, action, target,
+timestamp, and correlation ID: command requests including refusals, command
+timeouts, media uploads, and edge configuration delivery. It is the record to
+query when reconstructing an incident — see `23-development-and-operations.md`.
+
+### Live change stream
+
+`GET /api/v1/stream` emits small invalidation envelopes over server-sent events.
+It carries no farm data, so it is safe to leave open, and a client that misses a
+hint re-reads on reconnect.
+
+### Not yet implemented
+
+- No metrics endpoint. Operational signals come from logs and the audit table.
+- No outbound notification. An open alert is visible in the UI and over the
+  change stream; nothing pages an operator who is not looking. This is the most
+  significant gap for genuinely unattended operation and is stated in
+  `22-implementation-status.md`.

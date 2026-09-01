@@ -122,9 +122,9 @@ The first version must remain useful without automatic nutrient dosing. Chemistr
 
 ### Edge
 
-- ESP32
+- ESP32 (reference firmware in [`firmware/esp32`](firmware/esp32/README.md))
 - MQTT
-- local persisted configuration
+- local persisted configuration in NVS
 - watchdog and fail-safe outputs
 
 ### Local infrastructure
@@ -153,6 +153,9 @@ Key documents:
 - [Implementation roadmap](docs/17-implementation-roadmap.md)
 - [Initial engineering backlog](docs/18-engineering-backlog.md)
 - [Browser-only / GitHub Pages runtime](docs/21-browser-only-runtime.md)
+- [Implementation status and limitations](docs/22-implementation-status.md)
+- [Development, operations, and commissioning](docs/23-development-and-operations.md)
+- [ESP32 reference firmware](firmware/esp32/README.md)
 
 ## Relationship to farmOS
 
@@ -164,7 +167,17 @@ No farmOS source code is copied into this project.
 
 ## Status
 
-The executable V0 software baseline is implemented: browser-only IndexedDB/PWA operation, the operational React UI and WebGPU-first digital twin, Go/PostgreSQL/MQTT server mode, deterministic simulators, bounded command safety, migrations, containers, CI, and automated unit/contract/E2E coverage.
+The executable V0 software baseline is implemented: browser-only IndexedDB/PWA
+operation, the operational React UI and WebGPU-first digital twin,
+Go/PostgreSQL/MQTT server mode with authentication and role enforcement,
+compare-and-swap state concurrency, relational telemetry with bounded history,
+continuous server-side alert evaluation, server-sent live updates, durable
+command delivery, validated media storage, an ESP32 reference firmware target,
+migrations, containers, CI, and automated unit/integration/E2E coverage.
+
+Everything that is proven only against the simulator says so. Nothing in this
+repository can energize real equipment by default, and automatic nutrient or pH
+dosing is not implemented at all.
 
 Quick browser start:
 
@@ -183,4 +196,8 @@ docker compose --profile simulator up -d simulator
 cd frontend && npm ci && npm run dev
 ```
 
-See [implementation status](docs/22-implementation-status.md) for the exact capability matrix and the hardware-dependent work that remains deliberately gated. See [development and operations](docs/23-development-and-operations.md) for verification, backup, commissioning, and incident procedures.
+See [implementation status](docs/22-implementation-status.md) for the exact
+capability matrix, the stated limitations, and the hardware-dependent work that
+remains deliberately gated. See [development and operations](docs/23-development-and-operations.md)
+for verification, authentication setup, the production checklist, backup,
+commissioning, and incident procedures.

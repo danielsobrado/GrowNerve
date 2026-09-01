@@ -18,10 +18,13 @@ type failingStore struct {
 	loadErr, saveErr error
 }
 
-func (store failingStore) Load(context.Context) (json.RawMessage, error) {
-	return store.load, store.loadErr
+func (store failingStore) Load(context.Context) (json.RawMessage, int64, error) {
+	return store.load, 1, store.loadErr
 }
-func (store failingStore) Save(context.Context, json.RawMessage) error { return store.saveErr }
+
+func (store failingStore) Save(context.Context, json.RawMessage, int64) (int64, error) {
+	return 0, store.saveErr
+}
 
 func makeRequest(handler http.Handler, method, path, body, contentType string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
@@ -57,7 +60,7 @@ func TestCollectionsAndETagConflict(t *testing.T) {
 	if got := makeRequest(handler, http.MethodGet, "/api/v1/facilities", "", "").Body.String(); got != "[]" {
 		t.Fatalf("empty collection = %q", got)
 	}
-	_ = store.Save(context.Background(), json.RawMessage(`{"facilities":[{"id":"one"}]}`))
+	_, _ = store.Save(context.Background(), json.RawMessage(`{"facilities":[{"id":"one"}]}`), AnyVersion)
 	if got := makeRequest(handler, http.MethodGet, "/api/v1/facilities", "", "").Body.String(); got != `[{"id":"one"}]` {
 		t.Fatalf("collection = %q", got)
 	}
@@ -69,8 +72,14 @@ func TestCollectionsAndETagConflict(t *testing.T) {
 	if response.Code != http.StatusConflict {
 		t.Fatalf("conflict = %d", response.Code)
 	}
-	if stateETag([]byte("same")) != stateETag([]byte("same")) {
-		t.Fatal("ETag is not deterministic")
+	if versionETag(7) != `"v7"` {
+		t.Fatalf("ETag = %s", versionETag(7))
+	}
+	if version, valid := parseETag(`W/"v7"`); !valid || version != 7 {
+		t.Fatalf("parseETag = %d %v", version, valid)
+	}
+	if _, valid := parseETag(`"deadbeef"`); valid {
+		t.Fatal("hash-style ETag accepted as a version")
 	}
 }
 
@@ -92,7 +101,7 @@ func TestCommandValidationAndIdempotency(t *testing.T) {
 		t.Fatalf("no farm = %d", got)
 	}
 	store := NewMemoryStore()
-	_ = store.Save(context.Background(), json.RawMessage(commandStateJSON(true, 25, 100)))
+	_, _ = store.Save(context.Background(), json.RawMessage(commandStateJSON(true, 25, 100)), AnyVersion)
 	handler := NewHandler(store)
 	if got := makeRequest(handler, http.MethodPost, "/api/v1/commands", `{"targetChannelId":"unknown","value":50,"reason":"test"}`, "application/json").Code; got != http.StatusNotFound {
 		t.Fatalf("unknown = %d", got)
@@ -103,7 +112,7 @@ func TestCommandValidationAndIdempotency(t *testing.T) {
 	if got := makeRequest(handler, http.MethodPost, "/api/v1/commands", `{"targetChannelId":"01990a20-6a00-7000-8000-000000000001","value":10,"reason":"test"}`, "application/json").Code; got != http.StatusUnprocessableEntity {
 		t.Fatalf("unsafe = %d", got)
 	}
-	_ = store.Save(context.Background(), json.RawMessage(commandStateJSON(true, 25, 100)))
+	_, _ = store.Save(context.Background(), json.RawMessage(commandStateJSON(true, 25, 100)), AnyVersion)
 	body := `{"targetChannelId":"01990a20-6a00-7000-8000-000000000001","value":50,"reason":"test"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/commands", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -125,15 +134,15 @@ func TestCommandValidationAndIdempotency(t *testing.T) {
 
 func TestMemoryStoreCopiesState(t *testing.T) {
 	store := NewMemoryStore()
-	if _, err := store.Load(context.Background()); !errors.Is(err, ErrNotFound) {
+	if _, _, err := store.Load(context.Background()); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("Load() = %v", err)
 	}
 	input := json.RawMessage(`{"a":1}`)
-	_ = store.Save(context.Background(), input)
+	_, _ = store.Save(context.Background(), input, AnyVersion)
 	input[2] = 'x'
-	loaded, _ := store.Load(context.Background())
+	loaded, _, _ := store.Load(context.Background())
 	loaded[2] = 'y'
-	again, _ := store.Load(context.Background())
+	again, _, _ := store.Load(context.Background())
 	if string(again) != `{"a":1}` {
 		t.Fatalf("state aliased: %s", again)
 	}
@@ -148,7 +157,7 @@ func (publisher *recordingPublisher) PublishCommand(context.Context, string, dev
 
 func TestAcceptedCommandPublishesAfterPersistence(t *testing.T) {
 	store := NewMemoryStore()
-	_ = store.Save(context.Background(), json.RawMessage(commandStateJSON(true, 25, 100)))
+	_, _ = store.Save(context.Background(), json.RawMessage(commandStateJSON(true, 25, 100)), AnyVersion)
 	publisher := &recordingPublisher{}
 	handler := NewHandler(store, WithCommandPublisher(publisher))
 	body := `{"targetChannelId":"01990a20-6a00-7000-8000-000000000001","value":50,"reason":"test","expiresAt":"` + time.Now().Add(time.Minute).UTC().Format(time.RFC3339Nano) + `"}`

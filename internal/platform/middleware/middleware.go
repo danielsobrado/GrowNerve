@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"slices"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -17,6 +18,11 @@ const correlationKey contextKey = "correlation_id"
 type Options struct {
 	AllowedOrigins []string
 	Logger         *slog.Logger
+	// ReadLimit and WriteLimit throttle per client. A zero rate disables that
+	// limiter, which is the right default on a trusted LAN and the wrong one
+	// anywhere else.
+	ReadLimit  RateLimit
+	WriteLimit RateLimit
 }
 
 func CorrelationID(ctx context.Context) string {
@@ -25,6 +31,13 @@ func CorrelationID(ctx context.Context) string {
 }
 
 func Chain(next http.Handler, options Options) http.Handler {
+	var readLimiter, writeLimiter *Limiter
+	if options.ReadLimit.Rate > 0 {
+		readLimiter = NewLimiter(options.ReadLimit)
+	}
+	if options.WriteLimit.Rate > 0 {
+		writeLimiter = NewLimiter(options.WriteLimit)
+	}
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		started := time.Now()
 		correlationID := request.Header.Get("X-Correlation-ID")
@@ -47,6 +60,18 @@ func Chain(next http.Handler, options Options) http.Handler {
 		}
 		if request.Method == http.MethodOptions {
 			writer.WriteHeader(http.StatusNoContent)
+			return
+		}
+		limiter := readLimiter
+		if isMutating(request.Method) {
+			limiter = writeLimiter
+		}
+		if limiter != nil && !limiter.Allow(clientKey(request)) {
+			writer.Header().Set("Retry-After", strconv.Itoa(int(limiter.RetryAfter().Seconds()+1)))
+			if options.Logger != nil {
+				options.Logger.Warn("http_rate_limited", "correlation_id", correlationID, "path", request.URL.Path, "method", request.Method)
+			}
+			http.Error(writer, "too many requests", http.StatusTooManyRequests)
 			return
 		}
 		defer func() {

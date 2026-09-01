@@ -1,10 +1,38 @@
+# Production example. Configuration validation refuses to start a production
+# process with development authentication, wildcard CORS, an unbounded write
+# rate, or an anonymous broker, so each of these keys is required rather than
+# advisory.
 env: production
 
 server:
   address: 127.0.0.1:8080
   shutdown_timeout: 15s
+  # Bind behind a reverse proxy that terminates TLS. Never expose this port,
+  # PostgreSQL, or the broker directly to an untrusted network.
   cors_allowed_origins:
     - https://grownerve.example.com
+  rate_limit:
+    read_per_second: 30
+    read_burst: 60
+    write_per_second: 5
+    write_burst: 10
+
+auth:
+  # Use oidc where an identity provider exists; local suits a small deployment
+  # with a handful of operators.
+  mode: oidc
+  local_accounts_env: GROWNERVE_LOCAL_ACCOUNTS
+  oidc:
+    issuer: https://id.example.com/realms/farm
+    audience: grownerve
+    role_claim: grownerve_role
+    # Map provider groups onto GrowNerve roles. Anything unmapped falls back to
+    # default_role, which should be the least privileged tier.
+    role_mapping:
+      farm-admins: administrator
+      farm-managers: manager
+      farm-operators: operator
+    default_role: viewer
 
 postgres:
   url_env: GROWNERVE_DATABASE_URL
@@ -12,11 +40,23 @@ postgres:
 mqtt:
   broker: tls://mqtt.internal:8883
   client_id: grownerve-server
+  username_env: GROWNERVE_MQTT_USERNAME
+  password_env: GROWNERVE_MQTT_PASSWORD
 
 telemetry:
   batch_size: 500
   flush_interval: 1s
+  # Choose deliberately: this is how much grow history the system keeps.
+  retention: 8760h
+
+runtime:
+  command_sweep_interval: 5s
+  alert_interval: 10s
+  retention_interval: 6h
+  config_sync_interval: 30s
+  device_offline_after: 90s
 
 media:
   provider: filesystem
   path: /var/lib/grownerve/media
+  maximum_bytes: 16777216

@@ -37,7 +37,7 @@ func TestStateHandlerRoundTrip(t *testing.T) {
 
 func TestStateHandlerRejectsInvalidBodyWithoutChangingState(t *testing.T) {
 	store := NewMemoryStore()
-	if err := store.Save(context.Background(), json.RawMessage(`{"facilities":[]}`)); err != nil {
+	if _, err := store.Save(context.Background(), json.RawMessage(`{"facilities":[]}`), AnyVersion); err != nil {
 		t.Fatal(err)
 	}
 	handler := NewHandler(store)
@@ -48,7 +48,7 @@ func TestStateHandlerRejectsInvalidBodyWithoutChangingState(t *testing.T) {
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", response.Code)
 	}
-	state, _ := store.Load(context.Background())
+	state, _, _ := store.Load(context.Background())
 	if string(state) != `{"facilities":[]}` {
 		t.Fatalf("state changed to %s", state)
 	}
