@@ -1,6 +1,7 @@
 package deviceprotocol
 
 import (
+	"math"
 	"testing"
 	"time"
 )
@@ -43,6 +44,12 @@ func TestCommandAndAcknowledgementValidation(t *testing.T) {
 	if err := command.Validate(now); err == nil {
 		t.Fatal("expired command accepted")
 	}
+	command.ExpiresAt = now.Add(time.Minute)
+	command.IssuedAt = now.Add(61 * time.Second)
+	if err := command.Validate(now); err == nil {
+		t.Fatal("future-dated command accepted")
+	}
+
 	ack := Acknowledgement{ProtocolVersion: 1, CommandID: deviceID, DeviceID: channelID, Result: "applied", AcknowledgedAt: now}
 	if err := ack.Validate(); err != nil {
 		t.Fatalf("valid ack: %v", err)
@@ -76,5 +83,70 @@ func TestProtocolValidationBoundaries(t *testing.T) {
 		if err := ack.Validate(); err == nil {
 			t.Fatalf("Validate(%+v) succeeded", ack)
 		}
+	}
+}
+
+func validEdgeConfig() EdgeConfig {
+	minimum := 30.0
+	return EdgeConfig{
+		ProtocolVersion: Version,
+		DeviceID:        deviceID,
+		ConfigVersion:   "v2",
+		IssuedAt:        time.Now().UTC(),
+		Config: EdgeSettings{
+			TimezonePOSIX:     "GST-4",
+			Photoperiod:       &Photoperiod{OnHour: 6, OffHour: 23, ChannelID: channelID},
+			FanMinimumPercent: &minimum,
+			SafeOutputs:       map[string]float64{channelID: 0},
+			TelemetryIntervalSeconds: 10,
+			CommandTimeoutSeconds:    300,
+		},
+	}
+}
+
+func TestEdgeConfigAcceptsExplicitPOSIXTimezoneAndBoundedOutputs(t *testing.T) {
+	config := validEdgeConfig()
+	if err := config.Validate(); err != nil {
+		t.Fatalf("valid edge configuration: %v", err)
+	}
+}
+
+func TestEdgeConfigRejectsIANAZoneForPOSIXField(t *testing.T) {
+	config := validEdgeConfig()
+	config.Config.TimezonePOSIX = "Asia/Dubai"
+	if err := config.Validate(); err == nil {
+		t.Fatal("IANA timezone was accepted as a POSIX TZ rule")
+	}
+}
+
+func TestEdgeConfigRejectsAmbiguousOrUnsafeScheduleValues(t *testing.T) {
+	for name, mutate := range map[string]func(*EdgeConfig){
+		"zero schedule window": func(config *EdgeConfig) {
+			config.Config.Photoperiod.OnHour = 6
+			config.Config.Photoperiod.OffHour = 6
+		},
+		"safe output over 100": func(config *EdgeConfig) {
+			config.Config.SafeOutputs[channelID] = 101
+		},
+		"safe output NaN": func(config *EdgeConfig) {
+			config.Config.SafeOutputs[channelID] = math.NaN()
+		},
+		"safe output non UUID": func(config *EdgeConfig) {
+			config.Config.SafeOutputs = map[string]float64{"fan": 30}
+		},
+		"telemetry interval too large": func(config *EdgeConfig) {
+			config.Config.TelemetryIntervalSeconds = 3601
+		},
+		"command timeout too large": func(config *EdgeConfig) {
+			config.Config.CommandTimeoutSeconds = 86401
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			config := validEdgeConfig()
+			mutate(&config)
+			if err := config.Validate(); err == nil {
+				t.Fatal("unsafe edge configuration was accepted")
+			}
+		})
 	}
 }
