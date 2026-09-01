@@ -25,6 +25,8 @@ This directory is the implementation blueprint for GrowNerve. Documents are orde
 19. [farmOS influences](19-farmos-influences.md)
 20. [Architecture decisions](20-architecture-decisions.md)
 21. [Browser-only / GitHub Pages runtime](21-browser-only-runtime.md)
+22. [Implementation status and external gates](22-implementation-status.md)
+23. [Development, operations, and commissioning](23-development-and-operations.md)
 
 ## Runtime modes
 

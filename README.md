@@ -164,4 +164,23 @@ No farmOS source code is copied into this project.
 
 ## Status
 
-Documentation and architecture definition are the first deliverable. Implementation begins only after the V0 boundaries and safety model are explicit enough to prevent the hardware, backend, browser-only runtime, and UI from evolving into incompatible prototypes.
+The executable V0 software baseline is implemented: browser-only IndexedDB/PWA operation, the operational React UI and WebGPU-first digital twin, Go/PostgreSQL/MQTT server mode, deterministic simulators, bounded command safety, migrations, containers, CI, and automated unit/contract/E2E coverage.
+
+Quick browser start:
+
+```bash
+cd frontend
+npm ci
+npm run dev:browser
+```
+
+Quick full-stack start:
+
+```bash
+cp .env.example .env
+docker compose up -d --build --wait
+docker compose --profile simulator up -d simulator
+cd frontend && npm ci && npm run dev
+```
+
+See [implementation status](docs/22-implementation-status.md) for the exact capability matrix and the hardware-dependent work that remains deliberately gated. See [development and operations](docs/23-development-and-operations.md) for verification, backup, commissioning, and incident procedures.

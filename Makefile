@@ -15,7 +15,7 @@ test:
 test-all:
 	go test -race -cover ./...
 	go vet ./...
-	cd frontend && npm run typecheck && npm run lint && npm run test:coverage && npm run build && npm run build:browser
+	cd frontend && npm run typecheck && npm run lint && npm run test:coverage && npm run test:e2e && npm run build && npm run build:browser
 run-api:
 	go run ./cmd/api
 run-frontend:

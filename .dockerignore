@@ -1,0 +1,13 @@
+.git
+.github
+.env
+bin
+coverage.out
+data
+frontend/coverage
+frontend/dev-dist
+frontend/dist
+frontend/node_modules
+frontend/playwright-report
+frontend/test-results
+**/*.tsbuildinfo

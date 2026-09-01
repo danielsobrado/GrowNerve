@@ -32,6 +32,7 @@ tasks:
       - { cmd: npm run typecheck, dir: frontend }
       - { cmd: npm run lint, dir: frontend }
       - { cmd: npm run test:coverage, dir: frontend }
+      - { cmd: npm run test:e2e, dir: frontend }
       - { cmd: npm run build, dir: frontend }
       - { cmd: npm run build:browser, dir: frontend }
   run:api:
