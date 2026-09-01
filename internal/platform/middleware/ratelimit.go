@@ -3,34 +3,26 @@ package middleware
 import (
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
 
-// RateLimit describes a token-bucket allowance.
 type RateLimit struct {
-	// Rate is the sustained requests per second permitted per client.
-	Rate float64
-	// Burst is how many requests may arrive at once before throttling starts.
+	Rate  float64
 	Burst float64
 }
 
-// bucket is one client's allowance. Tokens are computed lazily from elapsed
-// time, so no background goroutine is needed to refill them.
 type bucket struct {
 	tokens   float64
 	lastSeen time.Time
 }
 
-// Limiter throttles per client. Writes and commands are limited separately from
-// reads, because the damage a flood of actuator commands can do is not the same
-// as the cost of a flood of reads.
 type Limiter struct {
-	mu      sync.Mutex
-	buckets map[string]*bucket
-	limit   RateLimit
-	now     func() time.Time
-	// idleEviction bounds memory: a client that stops calling is forgotten.
+	mu           sync.Mutex
+	buckets      map[string]*bucket
+	limit        RateLimit
+	now          func() time.Time
 	idleEviction time.Duration
 }
 
@@ -47,7 +39,6 @@ func NewLimiter(limit RateLimit) *Limiter {
 	}
 }
 
-// Allow reports whether a client may proceed, consuming one token if so.
 func (limiter *Limiter) Allow(client string) bool {
 	now := limiter.now()
 	limiter.mu.Lock()
@@ -77,8 +68,6 @@ func (limiter *Limiter) evictIdle(now time.Time) {
 	}
 }
 
-// RetryAfter reports how long a throttled client should wait, so the response
-// tells the caller what to do rather than only that it failed.
 func (limiter *Limiter) RetryAfter() time.Duration {
 	if limiter.limit.Rate <= 0 {
 		return time.Second
@@ -86,19 +75,50 @@ func (limiter *Limiter) RetryAfter() time.Duration {
 	return time.Duration(float64(time.Second) / limiter.limit.Rate)
 }
 
-// clientKey identifies a caller for rate limiting. The remote address is used
-// directly: forwarded headers are attacker-controlled unless a trusted proxy
-// sets them, and trusting them here would let one client masquerade as many.
+func parseTrustedProxyCIDRs(values []string) []*net.IPNet {
+	proxies := make([]*net.IPNet, 0, len(values))
+	for _, value := range values {
+		_, network, err := net.ParseCIDR(value)
+		if err == nil {
+			proxies = append(proxies, network)
+		}
+	}
+	return proxies
+}
+
 func clientKey(request *http.Request) string {
+	return clientKeyWithProxies(request, nil)
+}
+
+// clientKeyWithProxies trusts X-Forwarded-For only when the TCP peer is inside
+// an explicitly configured proxy network. This preserves spoofing resistance
+// while preventing every operator behind one reverse proxy sharing a bucket.
+func clientKeyWithProxies(request *http.Request, trusted []*net.IPNet) string {
 	host, _, err := net.SplitHostPort(request.RemoteAddr)
 	if err != nil {
-		return request.RemoteAddr
+		host = request.RemoteAddr
+	}
+	peer := net.ParseIP(host)
+	trustedPeer := false
+	for _, network := range trusted {
+		if peer != nil && network.Contains(peer) {
+			trustedPeer = true
+			break
+		}
+	}
+	if trustedPeer {
+		for _, candidate := range strings.Split(request.Header.Get("X-Forwarded-For"), ",") {
+			if ip := net.ParseIP(strings.TrimSpace(candidate)); ip != nil {
+				return ip.String()
+			}
+		}
+	}
+	if peer != nil {
+		return peer.String()
 	}
 	return host
 }
 
-// isMutating reports whether a request changes state, and therefore whether it
-// should be counted against the stricter allowance.
 func isMutating(method string) bool {
 	switch method {
 	case http.MethodGet, http.MethodHead, http.MethodOptions:
