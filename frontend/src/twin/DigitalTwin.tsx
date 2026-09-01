@@ -1,7 +1,7 @@
 import { Html, OrbitControls } from "@react-three/drei";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { useRef, useState } from "react";
-import type { Group } from "three";
+import { WebGLRenderer, type Group, type WebGLRendererParameters } from "three";
 import type { EntityType, FarmData, SceneEntity } from "../domain/model";
 import { actionsForProfile, entityKey } from "./sceneState";
 
@@ -52,12 +52,28 @@ function Scene({ data, selection, onSelect }: { data: FarmData; selection?: Sele
 }
 
 export function DigitalTwin({ data, selection, onSelect, onAction }: { data: FarmData; selection?: Selection; onSelect: (selection: Selection) => void; onAction: (action: string) => void }) {
+  const [renderer, setRenderer] = useState<"starting" | "webgpu" | "webgl">("starting");
   const selectedBinding = selection && data.scene_layouts[0]?.entities.find((entry) => entry.entity_type === selection.type && entry.entity_id === selection.id);
+  const createRenderer = async (options: WebGLRendererParameters) => {
+    if (typeof navigator !== "undefined" && "gpu" in navigator) {
+      try {
+        const { WebGPURenderer } = await import("three/webgpu");
+        const webgpu = new WebGPURenderer({ canvas: options.canvas as HTMLCanvasElement, antialias: true });
+        await webgpu.init();
+        setRenderer("webgpu");
+        return webgpu;
+      } catch {
+        // A reported adapter can still fail initialization; use the explicit safe fallback.
+      }
+    }
+    setRenderer("webgl");
+    return new WebGLRenderer({ ...options, antialias: true });
+  };
   return <div className="gn-twin-wrap">
-    <Canvas camera={{ position: data.scene_layouts[0]?.camera_position ?? [7, 6, 8], fov: 42 }} dpr={[1, 1.75]} onPointerMissed={() => onSelect({ type: "facility", id: data.facilities[0].id })}>
+    <Canvas gl={createRenderer} camera={{ position: data.scene_layouts[0]?.camera_position ?? [7, 6, 8], fov: 42 }} dpr={[1, 1.75]} onPointerMissed={() => onSelect({ type: "facility", id: data.facilities[0].id })}>
       <Scene data={data} selection={selection} onSelect={onSelect} />
     </Canvas>
-    <div className="gn-renderer-badge"><span />{typeof navigator !== "undefined" && "gpu" in navigator ? "WebGPU ready" : "WebGL fallback"}</div>
+    <div className="gn-renderer-badge"><span />{renderer === "webgpu" ? "WebGPU renderer" : renderer === "webgl" ? "WebGL fallback" : "Starting renderer"}</div>
     {selectedBinding && <div className="gn-radial" aria-label="Entity actions">{actionsForProfile(selectedBinding.profile).slice(0, 5).map((action, index) => <button key={action} style={{ "--index": index } as React.CSSProperties} onClick={() => onAction(action)}>{action}</button>)}</div>}
   </div>;
 }

@@ -3,11 +3,13 @@ import {
   Droplets, FileJson, Gauge, Leaf, Lightbulb, Pause, Play, Plus, Power, RefreshCw,
   RotateCcw, Search, ShieldCheck, Thermometer, Upload, Waves, Wind,
 } from "lucide-react";
-import { useMemo, useRef, useState, type ChangeEvent } from "react";
+import { lazy, Suspense, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import type { AutomationRule, Device, EntityType, FarmData, GrowNerveArchive, RuntimeMode } from "../domain/model";
 import { Card, formatDateTime, formatRelative, PageHeader, Status } from "../components/Status";
-import { DigitalTwin, type Selection } from "../twin/DigitalTwin";
+import type { Selection } from "../twin/DigitalTwin";
+
+const DigitalTwin = lazy(() => import("../twin/DigitalTwin").then((module) => ({ default: module.DigitalTwin })));
 
 export interface ScreenActions {
   refreshSimulator: () => void;
@@ -113,7 +115,7 @@ export function TwinScreen({ data, selection, actions }: { data: FarmData; selec
   const selectedName = selection ? entityName(data, selection.type, selection.id) : "Select an object";
   const activeAlerts = selection ? data.alerts.filter((entry) => entry.entity_type === selection.type && entry.entity_id === selection.id && entry.status !== "resolved") : [];
   return <><PageHeader eyebrow="Operational digital twin" title="3D Twin" description="Select real domain entities in the pilot tent. HTML inspection and actions remain accessible outside the renderer." actions={<><Status tone="simulated">Simulated live state</Status><Status tone={typeof navigator !== "undefined" && "gpu" in navigator ? "ok" : "neutral"}>{typeof navigator !== "undefined" && "gpu" in navigator ? "WebGPU available" : "Fallback renderer"}</Status></>} />
-    <div className="gn-twin-layout"><Card className="gn-twin-card"><DigitalTwin data={data} selection={selection} onSelect={actions.select} onAction={(action) => { if (action === "Set output" && selection?.type === "device") { const channel = data.channels.find((entry) => entry.entity_id === selection.id && entry.kind === "command"); if (channel) actions.command(channel.id, 55, "3D radial action"); } }} /></Card>
+    <div className="gn-twin-layout"><Card className="gn-twin-card"><Suspense fallback={<div className="gn-loading"><p>Opening digital twin…</p></div>}><DigitalTwin data={data} selection={selection} onSelect={actions.select} onAction={(action) => { if (action === "Set output" && selection?.type === "device") { const channel = data.channels.find((entry) => entry.entity_id === selection.id && entry.kind === "command"); if (channel) actions.command(channel.id, 55, "3D radial action"); } }} /></Suspense></Card>
       <aside className="gn-inspector"><div className="gn-inspector-head"><span>{selection?.type.replaceAll("_", " ") ?? "Entity inspector"}</span><h2>{selectedName}</h2>{selection && <code>{selection.id.slice(0, 18)}…</code>}</div>{!selection ? <div className="gn-inspector-empty"><CircleGauge /><p>Select the reservoir, light, fan, or a plant position to inspect the same durable entity used by 2D views.</p></div> : <><section><h3>Current status</h3><Status tone={activeAlerts.length ? "warning" : "ok"}>{activeAlerts.length ? `${activeAlerts.length} active alert` : "Normal"}</Status></section><section><h3>Available actions</h3><div className="gn-action-stack"><button className="gn-button">Inspect history</button><button className="gn-button">Open configuration</button>{selection.type === "plant_position" && <button className="gn-button primary" onClick={() => actions.addObservation(`Visual inspection of ${selectedName}`, "info")}>Record observation</button>}</div></section>{activeAlerts.map((alert) => <section className="gn-inspector-alert" key={alert.id}><Status tone="warning">{alert.severity}</Status><strong>{alert.title}</strong><p>{alert.detail}</p></section>)}</>}</aside>
     </div></>;
 }
