@@ -15,12 +15,14 @@ import (
 	"github.com/jdanielsobrado/grownerve/internal/deviceprotocol"
 	"github.com/jdanielsobrado/grownerve/internal/media"
 	"github.com/jdanielsobrado/grownerve/internal/registry"
+	"github.com/jdanielsobrado/grownerve/internal/telemetry"
 )
 
 const maximumStateBytes = 32 << 20
 
 type Handler struct {
 	store     Store
+	committer StateCommitter
 	publisher CommandPublisher
 	notifier  Notifier
 	authorize Authorizer
@@ -36,25 +38,18 @@ type CommandPublisher interface {
 	PublishCommand(context.Context, string, deviceprotocol.Command) error
 }
 
-// Notifier receives a change hint after every accepted write so live-update
-// transports can invalidate without polling.
 type Notifier interface {
 	Notify(topic string)
 }
 
-// Authorizer decides whether the request may perform an action. It is separate
-// from safety validation: a caller can be authorized and still be refused by an
-// interlock, and vice versa.
 type Authorizer interface {
 	Authorize(request *http.Request, action string) error
 }
 
-// AuditRecorder durably records security-relevant actions.
 type AuditRecorder interface {
 	Record(ctx context.Context, entry AuditEntry)
 }
 
-// AuditEntry is one security-relevant action.
 type AuditEntry struct {
 	Actor         string         `json:"actor"`
 	Action        string         `json:"action"`
@@ -71,6 +66,10 @@ func WithCommandPublisher(publisher CommandPublisher) HandlerOption {
 	return func(handler *Handler) { handler.publisher = publisher }
 }
 
+func WithStateCommitter(committer StateCommitter) HandlerOption {
+	return func(handler *Handler) { handler.committer = committer }
+}
+
 func WithNotifier(notifier Notifier) HandlerOption {
 	return func(handler *Handler) { handler.notifier = notifier }
 }
@@ -83,20 +82,14 @@ func WithAuditRecorder(recorder AuditRecorder) HandlerOption {
 	return func(handler *Handler) { handler.audit = recorder }
 }
 
-// RegistryProjector keeps the relational identities that telemetry references in
-// step with the configuration document.
 type RegistryProjector interface {
 	Project(ctx context.Context, document registry.Document) error
 }
 
-// WithRegistry projects facilities, devices, and channels into their tables
-// whenever configuration is written. Without it, telemetry has no channel row to
-// reference and every measurement is rejected by the database.
 func WithRegistry(projector RegistryProjector) HandlerOption {
 	return func(handler *Handler) { handler.registry = projector }
 }
 
-// WithLogger supplies the logger used for degraded-path diagnostics.
 func WithLogger(logger *slog.Logger) HandlerOption {
 	return func(handler *Handler) { handler.logger = logger }
 }
@@ -175,10 +168,12 @@ type channelState struct {
 	SafeMinimum *float64 `json:"safe_minimum"`
 	SafeMaximum *float64 `json:"safe_maximum"`
 }
+
 type deviceState struct {
 	ID     string `json:"id"`
 	Online bool   `json:"online"`
 }
+
 type commandState struct {
 	Channels []channelState    `json:"channels"`
 	Devices  []deviceState     `json:"devices"`
@@ -186,7 +181,6 @@ type commandState struct {
 	Events   []json.RawMessage `json:"events"`
 }
 
-// commandOutcome is the decision reached for one command attempt.
 type commandOutcome struct {
 	record   map[string]any
 	encoded  []byte
@@ -225,8 +219,6 @@ func (handler *Handler) createCommand(writer http.ResponseWriter, request *http.
 	})
 	switch {
 	case errors.Is(err, errCommandRefused) && outcome.replayed:
-		// A retry of an already-accepted command returns the original record so
-		// the client cannot create a second actuation by retrying.
 		writer.Header().Set("Content-Type", "application/json")
 		writer.WriteHeader(http.StatusOK)
 		_, _ = writer.Write(outcome.encoded)
@@ -245,7 +237,7 @@ func (handler *Handler) createCommand(writer http.ResponseWriter, request *http.
 	handler.record(request.Context(), AuditEntry{
 		Actor: ActorOf(request), Action: "command.requested", TargetType: "channel", TargetID: intent.TargetChannelID,
 		CorrelationID: request.Header.Get("X-Correlation-ID"),
-		Detail:        map[string]any{"reason": intent.Reason, "status": outcome.record["status"], "rejection": outcome.record["reason_code"]},
+		Detail: map[string]any{"reason": intent.Reason, "status": outcome.record["status"], "rejection": outcome.record["reason_code"]},
 	})
 
 	if outcome.safety == nil && handler.publisher != nil {
@@ -270,9 +262,6 @@ type problemDetails struct {
 	detail string
 }
 
-// decideCommand validates one attempt against a loaded state document and
-// returns the next document to persist. It reports false when the request must
-// be refused or replayed rather than written.
 func (handler *Handler) decideCommand(rawState json.RawMessage, intent commandIntent, idempotencyKey string, outcome *commandOutcome, problem **problemDetails) (json.RawMessage, bool) {
 	var state commandState
 	if json.Unmarshal(rawState, &state) != nil {
@@ -364,12 +353,8 @@ func (handler *Handler) decideCommand(rawState json.RawMessage, intent commandIn
 	return next, true
 }
 
-// defaultCommandTTL bounds how long an unacknowledged command stays actionable.
 const defaultCommandTTL = 30 * time.Second
 
-// publishAccepted publishes a persisted command and promotes it to "published"
-// only after the broker accepts it, so the durable record never claims delivery
-// that did not happen.
 func (handler *Handler) publishAccepted(ctx context.Context, intent commandIntent, outcome *commandOutcome) {
 	protocolCommand := deviceprotocol.Command{
 		ProtocolVersion: deviceprotocol.Version, CommandID: outcome.record["id"].(string),
@@ -400,15 +385,10 @@ func (handler *Handler) publishAccepted(ctx context.Context, intent commandInten
 	outcome.encoded = encoded
 }
 
-// replaceKey rewrites one top-level key of the state document while preserving
-// every other key exactly as stored.
 func replaceKey(state json.RawMessage, key string, value any) (json.RawMessage, error) {
 	return ReplaceKeys(state, map[string]any{key: value})
 }
 
-// ReplaceKeys rewrites the named top-level keys of the state document, leaving
-// every other key byte-identical. Background jobs use it so updating alerts or
-// commands cannot drop a collection the writer did not model.
 func ReplaceKeys(state json.RawMessage, values map[string]any) (json.RawMessage, error) {
 	var object map[string]json.RawMessage
 	if err := json.Unmarshal(state, &object); err != nil {
@@ -467,11 +447,11 @@ func (handler *Handler) getState(writer http.ResponseWriter, request *http.Reque
 		writeProblem(writer, request, http.StatusInternalServerError, "STATE_READ_FAILED", "Farm state is temporarily unavailable")
 		return
 	}
-	// The document holds configuration; measurements live in their own store and
-	// are merged back in so the whole-state contract keeps working.
 	state = handler.projectMeasurements(request.Context(), state)
 	writer.Header().Set("Content-Type", "application/json")
-	writer.Header().Set("ETag", versionETag(version))
+	writer.Header().Set("Cache-Control", "no-store")
+	writer.Header().Set("ETag", representationETag(state))
+	writer.Header().Set(farmVersionHeader, versionHeader(version))
 	writer.WriteHeader(http.StatusOK)
 	_, _ = writer.Write(state)
 }
@@ -494,44 +474,93 @@ func (handler *Handler) putState(writer http.ResponseWriter, request *http.Reque
 		writeProblem(writer, request, http.StatusBadRequest, "INVALID_FARM_STATE", "Farm state must be a valid JSON object")
 		return
 	}
-	// The registry is projected before the document is stored. A configuration
-	// whose channels cannot be persisted would silently discard every
-	// measurement they produce, so it is refused rather than accepted.
-	if !handler.projectRegistry(writer, request, body) {
+
+	expected, ok := handler.stateWriteExpectation(writer, request)
+	if !ok {
 		return
 	}
-	// Measurements are served into the state projection but never stored in it.
-	// Without this, a client that reads the whole state and writes it back would
-	// copy history into the configuration document on every save.
-	if handler.telemetry != nil {
-		body = handler.adoptMeasurements(request.Context(), object, body)
+
+	var version int64
+	if handler.committer != nil {
+		version, err = handler.committer.CommitState(request.Context(), json.RawMessage(body), expected)
+	} else {
+		if !handler.projectRegistry(writer, request, body) {
+			return
+		}
+		if handler.telemetry != nil {
+			body, err = handler.adoptMeasurements(request.Context(), object, body)
+			if err != nil {
+				handler.writeStateCommitError(writer, request, NoVersion, err)
+				return
+			}
+		}
+		version, err = handler.store.Save(request.Context(), json.RawMessage(body), expected)
 	}
-	expected := AnyVersion
+	if err != nil {
+		handler.writeStateCommitError(writer, request, version, err)
+		return
+	}
+
+	handler.notify("state")
+	writer.Header().Set(farmVersionHeader, versionHeader(version))
+	writer.WriteHeader(http.StatusNoContent)
+}
+
+func (handler *Handler) stateWriteExpectation(writer http.ResponseWriter, request *http.Request) (int64, bool) {
+	if header := request.Header.Get(farmVersionHeader); header != "" {
+		version, valid := parseVersionHeader(header)
+		if !valid || version == NoVersion {
+			writeProblem(writer, request, http.StatusConflict, "STATE_VERSION_CONFLICT", "Farm state has changed; reload before saving")
+			return NoVersion, false
+		}
+		return version, true
+	}
 	if header := request.Header.Get("If-Match"); header != "" {
 		version, valid := parseETag(header)
 		if !valid {
 			writeProblem(writer, request, http.StatusConflict, "STATE_VERSION_CONFLICT", "Farm state has changed; reload before saving")
-			return
+			return NoVersion, false
 		}
-		expected = version
+		return version, true
 	}
-	version, err := handler.store.Save(request.Context(), json.RawMessage(body), expected)
+	if request.Header.Get("If-None-Match") == "*" {
+		return NoVersion, true
+	}
+	_, _, err := handler.store.Load(request.Context())
+	if errors.Is(err, ErrNotFound) {
+		return NoVersion, true
+	}
+	if err != nil {
+		writeProblem(writer, request, http.StatusInternalServerError, "STATE_READ_FAILED", "Farm state is temporarily unavailable")
+		return NoVersion, false
+	}
+	writeProblem(writer, request, http.StatusPreconditionRequired, "STATE_VERSION_REQUIRED", "Reload the farm state before replacing it")
+	return NoVersion, false
+}
+
+func (handler *Handler) writeStateCommitError(writer http.ResponseWriter, request *http.Request, version int64, err error) {
 	if errors.Is(err, ErrVersionConflict) {
-		writer.Header().Set("ETag", versionETag(version))
+		if version > NoVersion {
+			writer.Header().Set(farmVersionHeader, versionHeader(version))
+		}
 		writeProblem(writer, request, http.StatusConflict, "STATE_VERSION_CONFLICT", "Farm state has changed; reload before saving")
 		return
 	}
-	if err != nil {
-		writeProblem(writer, request, http.StatusInternalServerError, "STATE_WRITE_FAILED", "Farm state could not be persisted")
+	var invalid *registry.InvalidError
+	if errors.As(err, &invalid) {
+		writeProblem(writer, request, http.StatusUnprocessableEntity, "INVALID_REGISTRY", invalid.Reason)
 		return
 	}
-	handler.notify("state")
-	writer.Header().Set("ETag", versionETag(version))
-	writer.WriteHeader(http.StatusNoContent)
+	if errors.Is(err, telemetry.ErrInvalidMeasurement) {
+		writeProblem(writer, request, http.StatusUnprocessableEntity, "INVALID_MEASUREMENTS", "Imported measurements are invalid and no state was changed")
+		return
+	}
+	if handler.logger != nil {
+		handler.logger.Error("state_commit_failed", "error", err)
+	}
+	writeProblem(writer, request, http.StatusInternalServerError, "STATE_WRITE_FAILED", "Farm state could not be persisted")
 }
 
-// projectRegistry syncs the relational identities and reports whether the write
-// may continue.
 func (handler *Handler) projectRegistry(writer http.ResponseWriter, request *http.Request, body []byte) bool {
 	if handler.registry == nil {
 		return true
@@ -559,5 +588,9 @@ func (handler *Handler) projectRegistry(writer http.ResponseWriter, request *htt
 func writeProblem(writer http.ResponseWriter, request *http.Request, status int, code, detail string) {
 	writer.Header().Set("Content-Type", "application/problem+json")
 	writer.WriteHeader(status)
-	_ = json.NewEncoder(writer).Encode(map[string]any{"type": "https://grownerve.local/problems/" + strings.ToLower(code), "title": http.StatusText(status), "status": status, "detail": detail, "instance": request.URL.Path, "code": code, "correlationId": request.Header.Get("X-Correlation-ID")})
+	_ = json.NewEncoder(writer).Encode(map[string]any{
+		"type": "https://grownerve.local/problems/" + strings.ToLower(code), "title": http.StatusText(status),
+		"status": status, "detail": detail, "instance": request.URL.Path, "code": code,
+		"correlationId": request.Header.Get("X-Correlation-ID"),
+	})
 }
