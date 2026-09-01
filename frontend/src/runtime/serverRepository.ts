@@ -22,6 +22,7 @@ export interface ServerRepositoryOptions {
   /** Read the current bearer credential for every request. */
   token?: string | (() => string | undefined);
   reconnectDelay?: number;
+  onUnauthorized?: () => void;
 }
 
 export class ServerFarmRepository implements FarmRepository {
@@ -30,6 +31,7 @@ export class ServerFarmRepository implements FarmRepository {
   private version?: string;
   private streamAbort?: AbortController;
   private reconnectTimer?: ReturnType<typeof setTimeout>;
+  private unauthorizedHandled = false;
 
   constructor(private readonly baseURL = "http://127.0.0.1:8080", options: ServerRepositoryOptions = {}) {
     this.options = { reconnectDelay: 3000, ...options };
@@ -46,7 +48,15 @@ export class ServerFarmRepository implements FarmRepository {
     return headers;
   }
 
+  private unauthorized(): void {
+    if (this.unauthorizedHandled) return;
+    this.unauthorizedHandled = true;
+    this.closeStream();
+    this.options.onUnauthorized?.();
+  }
+
   private async failure(response: Response, fallback: string): Promise<Error> {
+    if (response.status === 401) this.unauthorized();
     try {
       const problem = await response.json() as { detail?: string; code?: string };
       if (problem.detail) return new Error(problem.detail);
@@ -66,6 +76,7 @@ export class ServerFarmRepository implements FarmRepository {
       return undefined;
     }
     if (!response.ok) throw await this.failure(response, "Server state failed");
+    this.unauthorizedHandled = false;
     this.version = response.headers.get("X-Farm-Version") ?? undefined;
     return await response.json() as FarmData;
   }
@@ -77,6 +88,7 @@ export class ServerFarmRepository implements FarmRepository {
     const response = await fetch(`${this.baseURL}/api/v1/state`, { method: "PUT", headers, body: JSON.stringify(data) });
     if (response.status === 409 || response.status === 428) throw new Error("Farm state changed on the server; reload before saving");
     if (!response.ok) throw await this.failure(response, "Server state save failed");
+    this.unauthorizedHandled = false;
     this.version = response.headers.get("X-Farm-Version") ?? undefined;
     this.emit();
   }
@@ -99,6 +111,7 @@ export class ServerFarmRepository implements FarmRepository {
       body: JSON.stringify({ targetChannelId: intent.targetChannelId, value: intent.value, reason: intent.reason }),
     });
     if (!response.ok && response.status !== 422) throw await this.failure(response, "Command failed");
+    this.unauthorizedHandled = false;
     this.emit();
     return await response.json() as FarmCommand;
   }
@@ -106,6 +119,7 @@ export class ServerFarmRepository implements FarmRepository {
   async history(query: HistoryQuery): Promise<Measurement[]> {
     const response = await fetch(this.historyURL(query), { headers: this.headers() });
     if (!response.ok) throw await this.failure(response, "History failed");
+    this.unauthorizedHandled = false;
     const payload = await response.json() as { measurements?: Measurement[] };
     return payload.measurements ?? [];
   }
@@ -113,6 +127,7 @@ export class ServerFarmRepository implements FarmRepository {
   async historyBuckets(query: HistoryQuery & { bucketSeconds: number }): Promise<MeasurementBucket[]> {
     const response = await fetch(this.historyURL(query), { headers: this.headers() });
     if (!response.ok) throw await this.failure(response, "History failed");
+    this.unauthorizedHandled = false;
     const payload = await response.json() as { buckets?: MeasurementBucket[] };
     return payload.buckets ?? [];
   }
@@ -136,7 +151,7 @@ export class ServerFarmRepository implements FarmRepository {
   }
 
   private openStream(): void {
-    if (this.streamAbort || typeof fetch === "undefined") return;
+    if (this.streamAbort || typeof fetch === "undefined" || this.unauthorizedHandled) return;
     const abort = new AbortController();
     this.streamAbort = abort;
     void this.readStream(abort);
@@ -148,7 +163,9 @@ export class ServerFarmRepository implements FarmRepository {
         headers: this.headers({ Accept: "text/event-stream" }),
         signal: abort.signal,
       });
-      if (!response.ok || !response.body) throw new Error(`stream ${response.status}`);
+      if (!response.ok) throw await this.failure(response, "Live updates failed");
+      if (!response.body) throw new Error("Live updates returned no response body");
+      this.unauthorizedHandled = false;
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
@@ -164,7 +181,7 @@ export class ServerFarmRepository implements FarmRepository {
       }
       throw new Error("stream closed");
     } catch (error) {
-      if (abort.signal.aborted) return;
+      if (abort.signal.aborted || this.unauthorizedHandled) return;
       this.scheduleReconnect(abort, error);
     }
   }
@@ -172,7 +189,7 @@ export class ServerFarmRepository implements FarmRepository {
   private scheduleReconnect(abort: AbortController, error: unknown): void {
     if (this.streamAbort !== abort) return;
     this.streamAbort = undefined;
-    if (this.listeners.size === 0) return;
+    if (this.listeners.size === 0 || this.unauthorizedHandled) return;
     this.emit();
     console.warn("GrowNerve live updates interrupted; reconnecting", error);
     this.reconnectTimer = setTimeout(() => this.openStream(), this.options.reconnectDelay);
