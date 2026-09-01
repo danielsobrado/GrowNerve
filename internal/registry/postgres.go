@@ -9,9 +9,6 @@ import (
 	"github.com/jdanielsobrado/grownerve/internal/platform/database/gen"
 )
 
-// PostgresProjector writes the registry inside one transaction, so a partially
-// applied configuration can never leave telemetry pointing at a channel that was
-// not stored.
 type PostgresProjector struct {
 	pool    *pgxpool.Pool
 	queries *gen.Queries
@@ -22,22 +19,28 @@ func NewPostgresProjector(pool *pgxpool.Pool) *PostgresProjector {
 }
 
 func (projector *PostgresProjector) Project(ctx context.Context, document Document) error {
+	transaction, err := projector.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = transaction.Rollback(ctx) }()
+	if err := ProjectWithQueries(ctx, projector.queries.WithTx(transaction), document); err != nil {
+		return err
+	}
+	return transaction.Commit(ctx)
+}
+
+// ProjectWithQueries projects a registry through the supplied query set. When
+// the queries are transaction-bound, callers can commit the registry atomically
+// with the configuration document and imported measurements.
+func ProjectWithQueries(ctx context.Context, queries *gen.Queries, document Document) error {
 	if err := document.Validate(); err != nil {
 		return err
 	}
 	if len(document.Facilities) == 0 {
 		return nil
 	}
-	transaction, err := projector.pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = transaction.Rollback(ctx) }()
-	queries := projector.queries.WithTx(transaction)
 
-	// Devices and channels are attached to the first facility. V0 is a
-	// single-facility installation, and the document does not carry a facility
-	// reference on either entity; when it does, this is the one place to change.
 	owner, err := uuidOf(document.Facilities[0].ID)
 	if err != nil {
 		return &InvalidError{"facility id must be a UUID"}
@@ -72,8 +75,6 @@ func (projector *PostgresProjector) Project(ctx context.Context, document Docume
 		}
 		entityID, err := uuidOf(channel.EntityID)
 		if err != nil {
-			// A channel with no valid entity still has to exist for telemetry to
-			// reference, so it is attached to the facility rather than refused.
 			entityID = owner
 		}
 		params := gen.UpsertDeviceChannelParams{
@@ -97,7 +98,7 @@ func (projector *PostgresProjector) Project(ctx context.Context, document Docume
 			return fmt.Errorf("project channel %s: %w", channel.Key, err)
 		}
 	}
-	return transaction.Commit(ctx)
+	return nil
 }
 
 func uuidOf(value string) (pgtype.UUID, error) {
