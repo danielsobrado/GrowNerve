@@ -15,9 +15,6 @@ import (
 	"time"
 )
 
-// keyFor returns the verification key named by a token header, refreshing the
-// key set once when the id is unknown so provider rotation does not require a
-// restart.
 func (authenticator *OIDCAuthenticator) keyFor(ctx context.Context, keyID string) (crypto.PublicKey, error) {
 	authenticator.mu.RLock()
 	key, found := authenticator.keys[keyID]
@@ -37,8 +34,6 @@ func (authenticator *OIDCAuthenticator) keyFor(ctx context.Context, keyID string
 	if key, found = authenticator.keys[keyID]; found {
 		return key, nil
 	}
-	// A provider publishing a single unnamed key is common; accept it only when
-	// the key set is unambiguous.
 	if keyID == "" && len(authenticator.keys) == 1 {
 		for _, only := range authenticator.keys {
 			return only, nil
@@ -48,6 +43,18 @@ func (authenticator *OIDCAuthenticator) keyFor(ctx context.Context, keyID string
 }
 
 func (authenticator *OIDCAuthenticator) refresh(ctx context.Context) error {
+	authenticator.refreshMu.Lock()
+	defer authenticator.refreshMu.Unlock()
+
+	// Another request may have refreshed while this caller waited for the lock.
+	authenticator.mu.RLock()
+	recent := !authenticator.lastRefresh.IsZero() && time.Since(authenticator.lastRefresh) <= minimumRefreshInterval
+	hasKeys := len(authenticator.keys) > 0
+	authenticator.mu.RUnlock()
+	if recent && hasKeys {
+		return nil
+	}
+
 	uri, err := authenticator.discoverJWKS(ctx)
 	if err != nil {
 		return err
@@ -87,8 +94,6 @@ func (authenticator *OIDCAuthenticator) refresh(ctx context.Context) error {
 	return nil
 }
 
-// discoverJWKS reads the issuer's OpenID configuration once and caches the key
-// set location.
 func (authenticator *OIDCAuthenticator) discoverJWKS(ctx context.Context) (string, error) {
 	authenticator.mu.RLock()
 	cached := authenticator.jwksURI
