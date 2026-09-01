@@ -12,9 +12,6 @@ import (
 	"github.com/jdanielsobrado/grownerve/internal/platform/database/gen"
 )
 
-// PostgresStore persists measurements relationally. Writes are append-only and
-// touch only the measurement tables, so a telemetry burst never rewrites the
-// farm configuration document.
 type PostgresStore struct {
 	pool    *pgxpool.Pool
 	queries *gen.Queries
@@ -24,8 +21,6 @@ func NewPostgresStore(pool *pgxpool.Pool) *PostgresStore {
 	return &PostgresStore{pool: pool, queries: gen.New(pool)}
 }
 
-// Append writes a batch inside one transaction and refreshes the latest-value
-// projection, so a reader never sees a projection ahead of its measurement.
 func (store *PostgresStore) Append(ctx context.Context, measurements []Measurement) (int, error) {
 	if len(measurements) == 0 {
 		return 0, nil
@@ -35,7 +30,17 @@ func (store *PostgresStore) Append(ctx context.Context, measurements []Measureme
 		return 0, err
 	}
 	defer func() { _ = transaction.Rollback(ctx) }()
-	queries := store.queries.WithTx(transaction)
+	written, err := AppendWithQueries(ctx, store.queries.WithTx(transaction), measurements)
+	if err != nil {
+		return written, err
+	}
+	return written, transaction.Commit(ctx)
+}
+
+// AppendWithQueries writes a measurement batch through the supplied query set.
+// A transaction-bound query set lets state import commit history, registry, and
+// configuration as one atomic operation.
+func AppendWithQueries(ctx context.Context, queries *gen.Queries, measurements []Measurement) (int, error) {
 	written := 0
 	for _, measurement := range measurements {
 		if err := measurement.Validate(); err != nil {
@@ -68,7 +73,6 @@ func (store *PostgresStore) Append(ctx context.Context, measurements []Measureme
 		}
 		id, err := queries.InsertMeasurement(ctx, params)
 		if errors.Is(err, pgx.ErrNoRows) {
-			// A duplicate of an already-stored sample: a device retry, not a fault.
 			continue
 		}
 		if err != nil {
@@ -82,7 +86,7 @@ func (store *PostgresStore) Append(ctx context.Context, measurements []Measureme
 		}
 		written++
 	}
-	return written, transaction.Commit(ctx)
+	return written, nil
 }
 
 func (store *PostgresStore) History(ctx context.Context, query Query) ([]Measurement, error) {
@@ -155,8 +159,6 @@ func (store *PostgresStore) Latest(ctx context.Context) ([]Measurement, error) {
 	return measurements, nil
 }
 
-// Recent returns the newest samples across every channel for the compatibility
-// projection the browser adapter reads.
 func (store *PostgresStore) Recent(ctx context.Context, limit int) ([]Measurement, error) {
 	if limit <= 0 || limit > MaximumLimit {
 		limit = MaximumLimit
@@ -216,8 +218,6 @@ func uuidText(id pgtype.UUID) string {
 	return value
 }
 
-// numericOf converts through decimal text so a float never loses precision to
-// an intermediate binary representation on the way into NUMERIC.
 func numericOf(value float64) (pgtype.Numeric, error) {
 	var numeric pgtype.Numeric
 	if err := numeric.Scan(strconv.FormatFloat(value, 'f', -1, 64)); err != nil {
