@@ -111,11 +111,12 @@ func run() error {
 		_ = json.NewEncoder(writer).Encode(map[string]string{"version": version})
 	})
 	mux.HandleFunc("GET /api/v1/stream", events.Stream)
-	mux.Handle("/api/v1/", farm.NewHandler(stateStore,
+	api := farm.RequireCommandIdempotency(farm.NewHandler(stateStore,
 		farm.WithStateCommitter(stateCommitter),
 		farm.WithCommandPublisher(publisher), farm.WithTelemetry(samples), farm.WithMediaStore(mediaStore),
 		farm.WithNotifier(events), farm.WithAuthorizer(farm.RoleAuthorizer{}),
 		farm.WithAuditRecorder(recorder), farm.WithLogger(logger)))
+	mux.Handle("/api/v1/", api)
 
 	authenticated := auth.Middleware(authenticator, []string{"/health", "/version"}, logger)(mux)
 	handler := platformmiddleware.Chain(authenticated, platformmiddleware.Options{
