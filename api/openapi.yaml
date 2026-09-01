@@ -35,28 +35,56 @@ paths:
       summary: Read the complete farm state
       operationId: getFarmState
       responses:
-        "200": { description: Browser-compatible complete farm state, headers: { ETag: { schema: { type: string } } }, content: { application/json: { schema: { $ref: "#/components/schemas/FarmState" } } } }
+        "200":
+          description: Browser-compatible complete farm state.
+          headers:
+            ETag:
+              description: Strong validator for this exact projected response body, including live telemetry.
+              schema: { type: string }
+            X-Farm-Version:
+              description: Opaque optimistic-concurrency version. Echo this header on the next replacement.
+              schema: { type: string, pattern: "^[0-9]+$" }
+          content: { application/json: { schema: { $ref: "#/components/schemas/FarmState" } } }
         "204": { description: No farm has been configured. }
+        "500": { $ref: "#/components/responses/Problem" }
     put:
       summary: Replace the complete farm state
       operationId: replaceFarmState
+      description: >-
+        Replacing an existing farm requires the X-Farm-Version returned by the
+        latest GET. Creating the first farm uses If-None-Match: *. The write,
+        registry projection, and imported telemetry commit atomically.
       parameters:
         - in: header
-          name: If-Match
-          schema: { type: string }
+          name: X-Farm-Version
+          description: Version returned by the latest successful GET or PUT. Required when replacing existing state.
           required: false
+          schema: { type: string, pattern: "^[0-9]+$" }
+        - in: header
+          name: If-None-Match
+          description: Use * when creating the first farm so creation cannot overwrite an existing state.
+          required: false
+          schema: { type: string, enum: ["*"] }
       requestBody:
         required: true
         content: { application/json: { schema: { $ref: "#/components/schemas/FarmState" } } }
       responses:
-        "204": { description: Farm state saved., headers: { ETag: { schema: { type: string } } } }
+        "204":
+          description: Farm state saved.
+          headers:
+            X-Farm-Version:
+              description: New optimistic-concurrency version.
+              schema: { type: string, pattern: "^[0-9]+$" }
         "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
-        "409": { description: The state changed since it was read; reload before saving., content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "409": { description: The supplied version or create precondition no longer matches; reload before saving., content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "413": { $ref: "#/components/responses/Problem" }
         "415": { $ref: "#/components/responses/Problem" }
+        "422": { description: Registry identities or imported measurements are invalid; no state is changed., content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "428": { description: Existing state cannot be replaced without X-Farm-Version., content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "429": { $ref: "#/components/responses/Problem" }
+        "500": { $ref: "#/components/responses/Problem" }
   /api/v1/overview:
     get:
       summary: Read the operational overview
