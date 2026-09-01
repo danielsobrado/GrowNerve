@@ -3,6 +3,7 @@ package farm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -10,7 +11,6 @@ import (
 	"github.com/jdanielsobrado/grownerve/internal/telemetry"
 )
 
-// TelemetryReader is the read side of measurement history the API needs.
 type TelemetryReader interface {
 	History(ctx context.Context, query telemetry.Query) ([]telemetry.Measurement, error)
 	Downsampled(ctx context.Context, query telemetry.Query) ([]telemetry.Bucket, error)
@@ -18,20 +18,12 @@ type TelemetryReader interface {
 	Recent(ctx context.Context, limit int) ([]telemetry.Measurement, error)
 }
 
-// WithTelemetry serves measurement history from the measurement store instead of
-// the farm document, and injects a bounded recent window into the compatibility
-// state projection so the existing browser adapter keeps working unchanged.
 func WithTelemetry(reader TelemetryReader) HandlerOption {
 	return func(handler *Handler) { handler.telemetry = reader }
 }
 
-// projectionWindow bounds how many recent samples the compatibility state
-// carries. The document is a configuration view; a client that wants real
-// history calls the measurement endpoints.
 const projectionWindow = 2000
 
-// getMeasurements serves bounded history for one channel. Every read is bounded,
-// so no client can request an unlimited scan.
 func (handler *Handler) getMeasurements(writer http.ResponseWriter, request *http.Request) {
 	if !handler.permit(writer, request, ActionRead) {
 		return
@@ -88,8 +80,6 @@ func (handler *Handler) getMeasurements(writer http.ResponseWriter, request *htt
 	writeJSON(writer, http.StatusOK, map[string]any{"channelId": channelID, "measurements": measurements})
 }
 
-// getLatestMeasurements serves the newest reading per channel, which is what the
-// operational screens need on load.
 func (handler *Handler) getLatestMeasurements(writer http.ResponseWriter, request *http.Request) {
 	if !handler.permit(writer, request, ActionRead) {
 		return
@@ -109,17 +99,12 @@ func (handler *Handler) getLatestMeasurements(writer http.ResponseWriter, reques
 	writeJSON(writer, http.StatusOK, latest)
 }
 
-// projectMeasurements merges the recent measurement window into the state
-// document. Telemetry is stored separately, so the document on disk holds no
-// measurements; this restores them for clients that still read the whole state.
 func (handler *Handler) projectMeasurements(ctx context.Context, state json.RawMessage) json.RawMessage {
 	if handler.telemetry == nil {
 		return state
 	}
 	recent, err := handler.telemetry.Recent(ctx, projectionWindow)
 	if err != nil {
-		// The configuration view is still useful without history, so a telemetry
-		// read failure degrades the response rather than failing it.
 		return state
 	}
 	if recent == nil {
@@ -162,38 +147,34 @@ func writeJSON(writer http.ResponseWriter, status int, payload any) {
 	_ = json.NewEncoder(writer).Encode(payload)
 }
 
-// TelemetryWriter accepts measurements a client submitted through the state
-// document, so an import or a browser-to-server migration does not lose history.
 type TelemetryWriter interface {
 	Append(ctx context.Context, measurements []telemetry.Measurement) (int, error)
 }
 
-// adoptMeasurements moves any measurements present in a submitted state document
-// into the measurement store and removes them from the document body. History is
-// preserved, but the configuration document stays free of unbounded data.
-func (handler *Handler) adoptMeasurements(ctx context.Context, object map[string]json.RawMessage, body []byte) []byte {
+// adoptMeasurements is the non-transactional compatibility path used by test
+// stores. Production uses PostgresStateCommitter so history, registry and state
+// commit atomically. Adoption never strips history after an append failure.
+func (handler *Handler) adoptMeasurements(ctx context.Context, object map[string]json.RawMessage, body []byte) ([]byte, error) {
 	raw, present := object["measurements"]
 	if !present {
-		return body
+		return body, nil
 	}
 	var submitted []telemetry.Measurement
-	if json.Unmarshal(raw, &submitted) == nil && len(submitted) > 0 {
-		if writer, writable := handler.telemetry.(TelemetryWriter); writable {
-			if _, err := writer.Append(ctx, submitted); err != nil {
-				handler.logTelemetryAdoption(err, len(submitted))
-			}
+	if err := json.Unmarshal(raw, &submitted); err != nil {
+		return nil, telemetry.ErrInvalidMeasurement
+	}
+	if len(submitted) > 0 {
+		writer, writable := handler.telemetry.(TelemetryWriter)
+		if !writable {
+			return nil, errors.New("measurement store is read-only")
+		}
+		if _, err := writer.Append(ctx, submitted); err != nil {
+			return nil, err
 		}
 	}
 	stripped, err := ReplaceKeys(body, map[string]any{"measurements": []telemetry.Measurement{}})
 	if err != nil {
-		return body
+		return nil, err
 	}
-	return stripped
-}
-
-func (handler *Handler) logTelemetryAdoption(err error, count int) {
-	if handler.logger == nil {
-		return
-	}
-	handler.logger.Warn("state_measurements_not_adopted", "error", err, "samples", count)
+	return stripped, nil
 }
