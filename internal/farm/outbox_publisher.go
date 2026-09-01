@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math"
 	"strings"
 	"time"
 
@@ -67,14 +68,14 @@ func (worker *OutboxWorker) Drain(ctx context.Context) error {
 		return err
 	}
 	for _, message := range pending {
-		if command, expired := expiredCommand(message, worker.now()); expired {
-			// MarkPublished is the store's existing terminal-success state. Here it
-			// means the queued work is complete without transport because publishing
-			// it would violate the command's absolute expiry safety boundary.
+		if command, discard, reason := queuedCommandDisposition(message, worker.now()); discard {
+			// MarkPublished is the store's terminal-success state. For commands it
+			// also means terminally discarded: replaying corrupted or expired
+			// actuator work is less safe than silently preserving a poisoned row.
 			if err := worker.queue.MarkPublished(ctx, message.ID); err != nil {
 				return err
 			}
-			worker.logger.Warn("outbox_expired_command_discarded", "message", message.ID, "command", command.CommandID, "topic", message.Topic)
+			worker.logger.Warn("outbox_command_discarded", "message", message.ID, "command", command.CommandID, "topic", message.Topic, "reason", reason)
 			continue
 		}
 		if err := worker.transport.PublishRaw(ctx, message.Topic, message.Payload); err != nil {
@@ -94,12 +95,37 @@ func (worker *OutboxWorker) Drain(ctx context.Context) error {
 	return worker.prune(ctx)
 }
 
-func expiredCommand(message outbox.Message, now time.Time) (deviceprotocol.Command, bool) {
+func queuedCommandDisposition(message outbox.Message, now time.Time) (deviceprotocol.Command, bool, string) {
 	var command deviceprotocol.Command
-	if !strings.HasSuffix(message.Topic, "/commands") || json.Unmarshal(message.Payload, &command) != nil {
-		return command, false
+	if !strings.HasSuffix(message.Topic, "/commands") {
+		return command, false, ""
 	}
-	return command, !command.ExpiresAt.IsZero() && !command.ExpiresAt.After(now)
+	if err := json.Unmarshal(message.Payload, &command); err != nil {
+		return command, true, "INVALID_COMMAND_JSON"
+	}
+	if command.CommandID != message.Key {
+		return command, true, "COMMAND_KEY_MISMATCH"
+	}
+	if err := command.Validate(now); err != nil {
+		return command, true, err.Error()
+	}
+	if !validQueuedCommandValue(command) {
+		return command, true, "INVALID_COMMAND_VALUE"
+	}
+	return command, false, ""
+}
+
+func validQueuedCommandValue(command deviceprotocol.Command) bool {
+	switch command.Type {
+	case "set_boolean":
+		_, ok := command.Value.(bool)
+		return ok
+	case "set_percent":
+		value, ok := command.Value.(float64)
+		return ok && value >= 0 && value <= 100 && !math.IsNaN(value) && !math.IsInf(value, 0)
+	default:
+		return false
+	}
 }
 
 func (worker *OutboxWorker) prune(ctx context.Context) error {
