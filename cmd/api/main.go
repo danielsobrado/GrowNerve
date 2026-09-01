@@ -24,7 +24,6 @@ import (
 	platformmiddleware "github.com/jdanielsobrado/grownerve/internal/platform/middleware"
 	mqttbridge "github.com/jdanielsobrado/grownerve/internal/platform/mqtt"
 	"github.com/jdanielsobrado/grownerve/internal/platform/outbox"
-	"github.com/jdanielsobrado/grownerve/internal/registry"
 	"github.com/jdanielsobrado/grownerve/internal/runtime"
 	"github.com/jdanielsobrado/grownerve/internal/telemetry"
 )
@@ -86,8 +85,9 @@ func run() error {
 	bridge.Start(runtimeContext)
 
 	publisher := farm.NewDurablePublisher(bridge, queue, logger)
+	configPublisher := runtime.NewValidatingConfigPublisher(bridge)
 	supervisor := runtime.New(stateStore, samples, logger, runtimeConfig(cfg),
-		runtime.WithNotifier(events), runtime.WithConfigPublisher(bridge),
+		runtime.WithNotifier(events), runtime.WithConfigPublisher(configPublisher),
 		runtime.WithAuditRecorder(recorder), runtime.WithOutbox(farm.NewOutboxWorker(queue, bridge, logger)))
 	supervisor.Start(runtimeContext)
 
@@ -114,7 +114,6 @@ func run() error {
 	mux.Handle("/api/v1/", farm.NewHandler(stateStore,
 		farm.WithStateCommitter(stateCommitter),
 		farm.WithCommandPublisher(publisher), farm.WithTelemetry(samples), farm.WithMediaStore(mediaStore),
-		farm.WithRegistry(registry.NewPostgresProjector(pool)),
 		farm.WithNotifier(events), farm.WithAuthorizer(farm.RoleAuthorizer{}),
 		farm.WithAuditRecorder(recorder), farm.WithLogger(logger)))
 
