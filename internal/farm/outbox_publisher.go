@@ -5,16 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/jdanielsobrado/grownerve/internal/deviceprotocol"
 	"github.com/jdanielsobrado/grownerve/internal/platform/outbox"
 )
 
-// DurablePublisher publishes commands to the broker and, when the broker is
-// unreachable, queues them for retry instead of dropping them. The command is
-// already persisted by the time this runs, so the queue only ever holds work
-// that an operator was told had been accepted.
 type DurablePublisher struct {
 	direct CommandPublisher
 	queue  outbox.Store
@@ -30,8 +27,6 @@ func (publisher *DurablePublisher) PublishCommand(ctx context.Context, deviceID 
 	if err == nil {
 		return nil
 	}
-	// The broker refused or was unavailable. An accepted command must not
-	// disappear because of that, so it is queued for the outbox worker.
 	payload, encodeErr := json.Marshal(command)
 	if encodeErr != nil {
 		return err
@@ -45,35 +40,43 @@ func (publisher *DurablePublisher) PublishCommand(ctx context.Context, deviceID 
 	return err
 }
 
-// OutboxWorker drains queued publications.
 type OutboxWorker struct {
 	queue     outbox.Store
 	transport RawPublisher
 	logger    *slog.Logger
 	batchSize int
-	// retention is how long published rows are kept before pruning.
 	retention time.Duration
 	pruned    time.Time
+	now       func() time.Time
 }
 
-// RawPublisher publishes an already-encoded payload to a topic.
 type RawPublisher interface {
 	PublishRaw(ctx context.Context, topic string, payload []byte) error
 }
 
 func NewOutboxWorker(queue outbox.Store, transport RawPublisher, logger *slog.Logger) *OutboxWorker {
-	return &OutboxWorker{queue: queue, transport: transport, logger: logger, batchSize: 64, retention: 48 * time.Hour}
+	return &OutboxWorker{
+		queue: queue, transport: transport, logger: logger, batchSize: 64,
+		retention: 48 * time.Hour, now: func() time.Time { return time.Now().UTC() },
+	}
 }
 
-// Drain publishes one batch. It is safe to call repeatedly; a message that keeps
-// failing burns its attempts and is eventually parked rather than retried
-// forever.
 func (worker *OutboxWorker) Drain(ctx context.Context) error {
 	pending, err := worker.queue.Pending(ctx, worker.batchSize)
 	if err != nil {
 		return err
 	}
 	for _, message := range pending {
+		if command, expired := expiredCommand(message, worker.now()); expired {
+			// MarkPublished is the store's existing terminal-success state. Here it
+			// means the queued work is complete without transport because publishing
+			// it would violate the command's absolute expiry safety boundary.
+			if err := worker.queue.MarkPublished(ctx, message.ID); err != nil {
+				return err
+			}
+			worker.logger.Warn("outbox_expired_command_discarded", "message", message.ID, "command", command.CommandID, "topic", message.Topic)
+			continue
+		}
 		if err := worker.transport.PublishRaw(ctx, message.Topic, message.Payload); err != nil {
 			if markErr := worker.queue.MarkFailed(ctx, message.ID, err.Error()); markErr != nil {
 				return markErr
@@ -81,8 +84,6 @@ func (worker *OutboxWorker) Drain(ctx context.Context) error {
 			if message.Attempts+1 >= outbox.MaximumAttempts {
 				worker.logger.Error("outbox_message_parked", "message", message.ID, "topic", message.Topic, "attempts", message.Attempts+1)
 			}
-			// The broker is down for everything, not just this message, so the
-			// rest of the batch waits for the next tick.
 			return nil
 		}
 		if err := worker.queue.MarkPublished(ctx, message.ID); err != nil {
@@ -93,8 +94,16 @@ func (worker *OutboxWorker) Drain(ctx context.Context) error {
 	return worker.prune(ctx)
 }
 
+func expiredCommand(message outbox.Message, now time.Time) (deviceprotocol.Command, bool) {
+	var command deviceprotocol.Command
+	if !strings.HasSuffix(message.Topic, "/commands") || json.Unmarshal(message.Payload, &command) != nil {
+		return command, false
+	}
+	return command, !command.ExpiresAt.IsZero() && !command.ExpiresAt.After(now)
+}
+
 func (worker *OutboxWorker) prune(ctx context.Context) error {
-	now := time.Now().UTC()
+	now := worker.now()
 	if now.Sub(worker.pruned) < time.Hour {
 		return nil
 	}
