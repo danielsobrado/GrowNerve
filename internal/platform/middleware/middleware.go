@@ -55,7 +55,7 @@ func Chain(next http.Handler, options Options) http.Handler {
 			writer.Header().Set("Access-Control-Allow-Origin", origin)
 			writer.Header().Set("Vary", "Origin")
 			writer.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Idempotency-Key, If-Match, If-None-Match, X-Correlation-ID, X-Farm-Version")
-			writer.Header().Set("Access-Control-Expose-Headers", "ETag, X-Correlation-ID, X-Farm-Version")
+			writer.Header().Set("Access-Control-Expose-Headers", "ETag, Retry-After, X-Correlation-ID, X-Farm-Version")
 			writer.Header().Set("Access-Control-Allow-Methods", "GET, PUT, POST, OPTIONS")
 		}
 		if request.Method == http.MethodOptions {
