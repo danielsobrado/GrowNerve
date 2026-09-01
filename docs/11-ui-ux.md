@@ -4,6 +4,15 @@
 
 GrowNerve should feel like an operational control product, not a generic admin dashboard. The primary question is always: what is happening in the farm right now, and what requires attention?
 
+The same UI must work in both runtime modes:
+
+```text
+server mode
+browser-only mode
+```
+
+Screens should depend on frontend application interfaces rather than caring whether data comes from OpenAPI or IndexedDB.
+
 ## Main navigation
 
 Suggested top-level areas:
@@ -22,6 +31,20 @@ Settings
 ```
 
 The exact labels can evolve, but operational tasks should stay separate from configuration-heavy screens.
+
+## Runtime identity
+
+The application must always know its runtime mode.
+
+Browser-only mode should show a small, non-intrusive indicator in Settings/About and anywhere physical-control semantics could be misunderstood:
+
+```text
+Browser only
+Local data
+Simulation/manual operation
+```
+
+Do not place a permanent warning banner across every screen, but never let simulated commands look like acknowledged real-hardware commands.
 
 ## Overview screen
 
@@ -57,7 +80,7 @@ Selecting the same reservoir from:
 - timeline
 - Three.js mesh
 
-must open the same entity inspector and fetch the same API resource.
+must open the same entity inspector and resolve the same resource regardless of runtime mode.
 
 ## Entity inspector
 
@@ -94,7 +117,9 @@ Low-risk manual control can be initiated from:
 - equipment list
 - 3D radial menu
 
-Every path calls the same command API.
+Every path calls the same command application service.
+
+In server mode that service reaches the Go command API. In browser-only mode it reaches the local simulator unless a future explicit browser hardware adapter is active.
 
 Dangerous actions need a confirmation surface that clearly states target, requested action, safety consequences, and current conditions. Confirmation should generally be HTML UI, not text floating in the 3D scene.
 
@@ -227,6 +252,41 @@ Clicking an alert should:
 
 The user should not need to hunt through the scene to locate a problem.
 
+## Import/export UX
+
+Browser-only mode must make data portability obvious without dominating normal operation.
+
+Settings contains:
+
+```text
+Export all data
+Import archive
+Storage usage
+Reset local farm
+Load pilot example
+```
+
+First-run empty state:
+
+```text
+Welcome to GrowNerve
+
+[ Create local farm ]
+[ Load pilot example ]
+[ Import .grownerve.json ]
+```
+
+Export must state whether media is included and show resulting/estimated size where practical.
+
+Import must validate first and present the selected mode clearly:
+
+```text
+Replace local data
+Merge data (later)
+```
+
+For V0, replace is the required safe path. The UI must never clear existing local data before the incoming archive has passed validation.
+
 ## Visual language
 
 Status should be consistent across 2D and 3D:
@@ -238,6 +298,7 @@ warning
 critical
 offline/unknown
 manual override
+simulated
 ```
 
 Do not rely on color alone; use icons, labels, patterns, or animation carefully.
@@ -261,10 +322,18 @@ Desktop can show scene + inspector side by side. Tablets should remain first-cla
 
 ## Offline/disconnected UI
 
-Distinguish clearly between:
+Server mode distinguishes clearly between:
 
 - browser disconnected from server
 - server unable to reach device
 - device healthy but a particular channel stale
+
+Browser-only mode distinguishes:
+
+- local browser runtime active
+- simulator paused
+- replay active
+- imported historical data
+- browser runtime resumed after suspension
 
 Never display an old measurement as if it were live simply because it is the last value in cache.

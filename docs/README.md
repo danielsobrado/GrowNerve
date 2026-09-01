@@ -24,6 +24,18 @@ This directory is the implementation blueprint for GrowNerve. Documents are orde
 18. [Engineering backlog](18-engineering-backlog.md)
 19. [farmOS influences](19-farmos-influences.md)
 20. [Architecture decisions](20-architecture-decisions.md)
+21. [Browser-only / GitHub Pages runtime](21-browser-only-runtime.md)
+
+## Runtime modes
+
+GrowNerve deliberately supports two modes from one frontend codebase:
+
+```text
+server mode   -> Go + PostgreSQL + MQTT + ESP32
+browser mode  -> IndexedDB + local simulator/imported data
+```
+
+Both expose the same product UI, entity identities, grow-management concepts, history views, alerts, and 3D twin. Browser mode is portable and static-hostable, but it is not considered a safe substitute for unattended physical automation.
 
 ## Non-negotiable constraints
 
@@ -32,9 +44,12 @@ This directory is the implementation blueprint for GrowNerve. Documents are orde
 - Automatic nutrient/pH dosing is not part of the first control release.
 - WebGPU is the preferred 3D rendering path.
 - The 3D scene is an operational digital twin, not decorative content.
-- Dangerous commands require server-side safety validation even when initiated from the 3D UI.
+- Dangerous commands require server-side safety validation in full mode even when initiated from the 3D UI.
+- Browser-only mode must clearly identify simulated/non-authoritative control.
 - Telemetry and meaningful farm events are separate data classes.
 - Domain services do not depend directly on HTTP, MQTT, SQL, or Three.js.
+- Browser persistence uses IndexedDB, not `localStorage`.
+- Browser exports are versioned and validated before import.
 - Configuration belongs in YAML/environment configuration, not hidden constants in application code.
 - The system stays a modular monolith until actual scaling pressure demonstrates a need to split it.
 

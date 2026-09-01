@@ -2,9 +2,16 @@
 
 ## Deployment goals
 
-GrowNerve is local-first. The default deployment should be easy to run on a small local server while preserving a path to larger installations.
+GrowNerve is local-first and supports two deployment shapes from one frontend codebase:
 
-## Initial runtime
+```text
+full local/server mode
+browser-only static mode
+```
+
+The default production farm runtime remains the local server because browser lifecycle rules are not appropriate for unattended crop-critical control.
+
+## Full local/server runtime
 
 ```text
 GrowNerve Go server
@@ -15,8 +22,6 @@ optional media storage
 ```
 
 For local development, Docker Compose can provide PostgreSQL and Mosquitto while Go/Vite run natively or in containers.
-
-## Production shape
 
 A small production installation can run:
 
@@ -30,9 +35,30 @@ static frontend
 
 Do not require Kubernetes.
 
+## Browser-only runtime
+
+```text
+GitHub Pages / any static host
+        |
+        v
+React + Three.js/WebGPU
+        |
+    IndexedDB
+        |
+local simulator / imported data
+```
+
+No backend service is required.
+
+The browser-only runtime supports the normal product workflows, history, 3D digital twin, rules, alerts, command state machine against a simulator, and complete JSON import/export.
+
+It is not a substitute for unattended hardware control because browsers can suspend execution and GitHub Pages cannot host the Go/MQTT runtime.
+
+See `21-browser-only-runtime.md`.
+
 ## Configuration
 
-Configuration should be YAML with environment overrides for secrets/deployment-specific values.
+Server configuration should be YAML with environment overrides for secrets/deployment-specific values.
 
 Suggested files:
 
@@ -71,6 +97,13 @@ media:
 
 Secrets are referenced through environment variables, not stored directly in YAML.
 
+Frontend build configuration conceptually includes:
+
+```text
+VITE_RUNTIME_MODE=server|browser
+VITE_BASE_PATH=/ or /GrowNerve/
+```
+
 ## Constants
 
 Protocol constants, default limits, and shared keys belong in focused constants/config packages. Do not scatter magic values through handlers or React components.
@@ -79,52 +112,127 @@ Safety limits that vary by equipment/installation belong to configuration/domain
 
 ## GitHub Pages
 
-The frontend may be published manually to GitHub Pages for demonstration/static mock deployments using `npm` scripts.
+GitHub Pages is the primary browser-only static deployment target.
 
-Important limitation: GitHub Pages can host only the static browser application. Real control requires a reachable GrowNerve API/MQTT-backed local server.
+The Pages build must:
 
-The frontend should support a demo/static data provider so the public Pages build can demonstrate the UI/3D twin without pretending to control real hardware.
+- require no API server
+- use IndexedDB persistence
+- include the Three.js/WebGPU twin
+- support `.grownerve.json` import/export
+- respect `/GrowNerve/` asset base paths
+- use routing compatible with static hosting
+- include deterministic pilot/example data only when the user explicitly loads it
+- clearly identify browser-only/simulated control
 
-Recommended manual workflow later:
+Recommended manual workflow:
 
 ```text
 npm ci
-npm run build
+npm run test
+npm run build:browser
 npm run deploy:pages
 ```
 
-No automatic Pages publication is required initially.
+No automatic Pages publication is required.
+
+## PWA
+
+The browser-only build should be installable/cacheable as a PWA.
+
+The service worker may cache:
+
+- application shell
+- versioned JS/CSS bundles
+- icons
+- GLB models
+- textures
+
+Mutable farm data belongs in IndexedDB, not the service-worker cache.
+
+After first load, the app should reopen offline where the target browser supports the configured PWA behavior.
 
 ## Base paths
 
-Because GitHub Pages project sites use a repository base path, Vite/router/asset loading must support a configurable base path. Three.js GLB/texture URLs must also respect it.
+GitHub Pages project sites use a repository base path:
 
-Do not hardcode `/assets/...` assumptions that break under `/GrowNerve/`.
+```text
+/GrowNerve/
+```
+
+Vite/router/asset loading must support this. Three.js GLB/texture URLs must also respect it.
+
+Do not hardcode `/assets/...` assumptions.
+
+## Routing
+
+A static host cannot provide normal SPA rewrite rules reliably.
+
+The Pages/browser build may use hash history:
+
+```text
+/GrowNerve/#/grow-cycles/...
+```
+
+The server-backed build may use normal history routing.
+
+Route selection belongs in runtime bootstrap, not scattered page code.
+
+## Browser storage
+
+Browser domain data uses IndexedDB.
+
+The UI exposes:
+
+- approximate storage usage
+- export all data
+- import archive
+- reset local farm
+
+Do not use `localStorage` for grow cycles, events, telemetry, media, inventory, or other domain data.
+
+## Portable backup
+
+Browser-only mode uses versioned `.grownerve.json` archives.
+
+The archive can include all domain data and base64 media. Import validates the full archive before replacing local state.
+
+The same archive format should later be accepted by the full server import workflow so a Pages-only farm can graduate to PostgreSQL without manual re-entry.
 
 ## Local DNS / access
 
-A practical home deployment should be usable from a tablet/phone on LAN through a stable hostname or IP. Remote access is optional and should use secure networking rather than exposing ESP32 controllers publicly.
+A practical full-mode home deployment should be usable from a tablet/phone on LAN through a stable hostname or IP. Remote access is optional and should use secure networking rather than exposing ESP32 controllers publicly.
 
 ## Database migrations
 
 Application startup should not silently mutate production schema unless that is an explicit deployment decision. Prefer a dedicated migration command/container step.
 
+Browser IndexedDB schema migrations are versioned separately and must be deterministic. Portable archive schema migration remains independent of the physical IndexedDB schema.
+
 ## Backups
 
-Document commands/scripts for:
+Full mode documents commands/scripts for:
 
 - database dump
 - database restore
 - media backup
 - configuration backup
 
+Browser mode provides:
+
+- `.grownerve.json` export
+- import/restore
+- explicit media inclusion
+
 ## Updates
 
 Server/frontend updates and ESP32 firmware updates are separate lifecycles. Normal recipe or schedule changes must not require firmware updates.
 
-## Demo mode
+The browser-only PWA must handle application upgrades without losing IndexedDB data.
 
-A demo provider should generate deterministic farm state for GitHub Pages and UI testing:
+## Pilot example
+
+A deterministic example dataset can be loaded on demand:
 
 ```text
 one facility
@@ -136,4 +244,4 @@ sensor values
 one warning scenario
 ```
 
-Demo actions should be clearly simulated and isolated from production adapters.
+Example/simulated actions are always labelled and isolated from real server adapters.

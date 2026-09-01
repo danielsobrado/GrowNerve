@@ -31,6 +31,39 @@ Facility
      -> Harvest
 ```
 
+## Runtime modes
+
+GrowNerve has two supported runtime shapes.
+
+### Full local/server mode
+
+```text
+React UI
+   -> Go API/live updates
+   -> PostgreSQL
+   -> Mosquitto
+   -> ESP32 controllers
+```
+
+This is the authoritative mode for real sensors, persistent farm automation, and physical equipment control.
+
+### Browser-only mode
+
+```text
+React UI
+   -> browser application services
+   -> IndexedDB
+   -> local simulator / imported telemetry
+```
+
+The browser-only build preserves the same normal UI, GrowCycle/recipe/event workflows, telemetry history, alerts, command workflow, and Three.js/WebGPU digital twin without requiring a backend.
+
+It supports complete import/export through a versioned `.grownerve.json` archive so a farm can be backed up, moved between browsers, or later migrated into the full PostgreSQL deployment.
+
+This mode is intended for GitHub Pages, offline/local planning, demonstrations, education, and lightweight farm record keeping. It cannot provide the same unattended real-hardware guarantees as the server + ESP32 runtime because browsers may suspend background work.
+
+See [Browser-only / GitHub Pages runtime](docs/21-browser-only-runtime.md).
+
 ## First installation
 
 The initial reference system is a small DWC indoor grow:
@@ -51,8 +84,10 @@ The first version must remain useful without automatic nutrient dosing. Chemistr
 ## Architecture principles
 
 - **Local-first:** essential farm operation must not depend on Internet connectivity.
+- **Portable local data:** browser-only farms persist in IndexedDB and can be exported/imported as versioned JSON archives.
 - **Edge-safe:** an ESP32 must retain essential schedules and safe states if the server disappears.
 - **WebGPU first:** the 3D client targets Three.js WebGPU first, with a deliberate fallback path where required.
+- **One UI:** server-backed and browser-only deployments use the same screens, entity selection, 3D twin, and interaction model.
 - **Typed domain:** use explicit agricultural and control concepts rather than a generic everything-is-an-asset database.
 - **Event history:** meaningful farm actions are immutable historical events.
 - **Telemetry is separate:** high-volume measurements are not stored as ordinary farm events.
@@ -82,6 +117,8 @@ The first version must remain useful without automatic nutrient dosing. Chemistr
 - Three.js
 - WebGPU renderer first
 - glTF/GLB assets
+- IndexedDB browser-runtime adapter
+- PWA support for static/offline browser mode
 
 ### Edge
 
@@ -115,6 +152,7 @@ Key documents:
 - [3D digital twin and Three.js plan](docs/12-3d-digital-twin.md)
 - [Implementation roadmap](docs/17-implementation-roadmap.md)
 - [Initial engineering backlog](docs/18-engineering-backlog.md)
+- [Browser-only / GitHub Pages runtime](docs/21-browser-only-runtime.md)
 
 ## Relationship to farmOS
 
@@ -126,4 +164,4 @@ No farmOS source code is copied into this project.
 
 ## Status
 
-Documentation and architecture definition are the first deliverable. Implementation begins only after the V0 boundaries and safety model are explicit enough to prevent the hardware, backend, and UI from evolving into incompatible prototypes.
+Documentation and architecture definition are the first deliverable. Implementation begins only after the V0 boundaries and safety model are explicit enough to prevent the hardware, backend, browser-only runtime, and UI from evolving into incompatible prototypes.

@@ -16,7 +16,40 @@ This backlog is ordered by dependency and user value. Ticket IDs are provisional
 - **GN-010** Initialize React + TypeScript + Vite application.
 - **GN-011** Add TanStack Router/Query.
 - **GN-012** Add CI formatting, lint, test, security, generated-drift gates.
-- **GN-013** Add deterministic demo provider for static UI/GitHub Pages.
+- **GN-013** Define frontend application/repository interfaces independent of HTTP/IndexedDB.
+
+## GN-050 — Browser-only runtime and portability
+
+- **GN-051** Add explicit frontend runtime mode bootstrap: `server|browser`.
+- **GN-052** Add IndexedDB persistence wrapper behind typed repositories.
+- **GN-053** Add browser database schema/version metadata.
+- **GN-054** Add deterministic IndexedDB migration framework.
+- **GN-055** Add local application change/event notification bus.
+- **GN-056** Add browser-mode first-run create/example/import flow.
+- **GN-057** Add deterministic pilot example loader without silent seeding.
+- **GN-058** Define `.grownerve.json` archive schema v1.
+- **GN-059** Add complete JSON export service.
+- **GN-060** Add optional media-to-base64 archive export.
+- **GN-061** Add archive JSON/schema validation.
+- **GN-062** Add referential-integrity and domain validation before import.
+- **GN-063** Add transactional replace import.
+- **GN-064** Add import rollback/unchanged-state tests on failure.
+- **GN-065** Add archive schema migration framework.
+- **GN-066** Add golden archive fixtures and round-trip tests.
+- **GN-067** Add deterministic export ordering tests.
+- **GN-068** Add storage-usage view and reset-local-farm workflow.
+- **GN-069** Add static-safe router mode for GitHub Pages.
+- **GN-070** Add configurable Vite base path for `/GrowNerve/`.
+- **GN-071** Add PWA manifest and application-shell/3D-asset caching.
+- **GN-072** Verify IndexedDB survives PWA/application upgrades.
+- **GN-073** Add manual `build:browser` and `deploy:pages` npm scripts.
+- **GN-074** Add browser/server adapter contract test harness.
+- **GN-075** Add visible browser-only/simulated runtime state.
+- **GN-076** Add browser telemetry replay engine.
+- **GN-077** Add browser local device simulator/fault scenarios.
+- **GN-078** Add browser command lifecycle simulator.
+- **GN-079** Add browser alert/rule evaluation while runtime is active.
+- **GN-080** Add future server import path for `.grownerve.json` archives.
 
 ## GN-100 — Facility and crop model
 
