@@ -1,20 +1,41 @@
 package farm
 
 import (
+	"crypto/sha256"
+	"fmt"
 	"strconv"
 	"strings"
 )
 
-// versionETag renders the stored version as an entity tag. Concurrency is
-// enforced by the store's compare-and-swap on that same version, so the tag a
-// client echoes back in If-Match is the value the write is validated against
-// rather than a hash compared in a separate, racy step.
+const farmVersionHeader = "X-Farm-Version"
+
+// representationETag is a strong validator for the actual response body. The
+// state response projects live telemetry, so its ETag must change when that
+// projection changes even if the configuration version does not.
+func representationETag(body []byte) string {
+	digest := sha256.Sum256(body)
+	return fmt.Sprintf(`"%x"`, digest)
+}
+
+func versionHeader(version int64) string {
+	return strconv.FormatInt(version, 10)
+}
+
+func parseVersionHeader(value string) (int64, bool) {
+	version, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+	if err != nil || version < 0 {
+		return 0, false
+	}
+	return version, true
+}
+
+// versionETag and parseETag remain for compatibility with older clients. New
+// clients use X-Farm-Version so HTTP representation caching is not conflated
+// with optimistic-concurrency state versioning.
 func versionETag(version int64) string {
 	return `"v` + strconv.FormatInt(version, 10) + `"`
 }
 
-// parseETag recovers the version from an If-Match header, reporting whether the
-// header was a tag this server could have issued.
 func parseETag(value string) (int64, bool) {
 	trimmed := strings.TrimPrefix(strings.TrimSpace(value), "W/")
 	if len(trimmed) < 4 || !strings.HasPrefix(trimmed, `"v`) || !strings.HasSuffix(trimmed, `"`) {
