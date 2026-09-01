@@ -12,17 +12,12 @@
 #include "secrets.h"
 #include "edge_config.h"
 #include "edge_policy.h"
+#include "hardware_config.h"
 
 namespace {
 
 constexpr int kProtocolVersion = 1;
-constexpr const char *kFirmwareVersion = "0.1.2";
-constexpr uint8_t kLightRelayPin = 26;
-constexpr uint8_t kFanPwmPin = 27;
-constexpr uint8_t kAirPumpRelayPin = 25;
-// GPIO33 supports the internal pull-up used by the normally-closed emergency
-// input. GPIO34 is input-only but has no internal pull-up and can float.
-constexpr uint8_t kEmergencyInputPin = 33;
+constexpr const char *kFirmwareVersion = "0.1.3";
 constexpr uint8_t kFanPwmChannel = 0;
 constexpr uint32_t kFanPwmFrequency = 25000;
 constexpr uint8_t kFanPwmResolution = 8;
@@ -185,19 +180,24 @@ OutputResolution resolveChannel(const char *channelId, float safeValue, const st
   return resolveOutput(policy, nowMillis);
 }
 
+void writeRelay(uint8_t pin, bool on, bool activeHigh) {
+  const bool electricalHigh = on == activeHigh;
+  digitalWrite(pin, electricalHigh ? HIGH : LOW);
+}
+
 void driveOutputs(const struct tm &localTime, uint32_t nowMillis) {
   const OutputResolution light = resolveChannel(CHANNEL_LIGHT, settings.safeLight, localTime, nowMillis);
   const OutputResolution fan = resolveChannel(CHANNEL_FAN, settings.safeFan, localTime, nowMillis);
   const OutputResolution airPump = resolveChannel(CHANNEL_AIR_PUMP, settings.safeAirPump, localTime, nowMillis);
 
-  digitalWrite(kLightRelayPin, light.value > 50 ? HIGH : LOW);
-  digitalWrite(kAirPumpRelayPin, airPump.value > 50 ? HIGH : LOW);
+  writeRelay(GN_LIGHT_RELAY_PIN, light.value > 50, GN_LIGHT_RELAY_ACTIVE_HIGH);
+  writeRelay(GN_AIR_PUMP_RELAY_PIN, airPump.value > 50, GN_AIR_PUMP_RELAY_ACTIVE_HIGH);
   ledcWrite(kFanPwmChannel, (uint32_t)(constrain(fan.value, 0.0f, 100.0f) * 255.0f / 100.0f));
 }
 
 void failSafeOutputs() {
-  digitalWrite(kLightRelayPin, LOW);
-  digitalWrite(kAirPumpRelayPin, settings.safeAirPump > 50 ? HIGH : LOW);
+  writeRelay(GN_LIGHT_RELAY_PIN, false, GN_LIGHT_RELAY_ACTIVE_HIGH);
+  writeRelay(GN_AIR_PUMP_RELAY_PIN, settings.safeAirPump > 50, GN_AIR_PUMP_RELAY_ACTIVE_HIGH);
   ledcWrite(kFanPwmChannel, (uint32_t)(constrain(settings.safeFan, 0.0f, 100.0f) * 255.0f / 100.0f));
 }
 
@@ -444,11 +444,11 @@ void connectWiFi() {
 void setup() {
   Serial.begin(115200);
 
-  pinMode(kLightRelayPin, OUTPUT);
-  pinMode(kAirPumpRelayPin, OUTPUT);
-  pinMode(kEmergencyInputPin, INPUT_PULLUP);
+  pinMode(GN_LIGHT_RELAY_PIN, OUTPUT);
+  pinMode(GN_AIR_PUMP_RELAY_PIN, OUTPUT);
+  pinMode(GN_EMERGENCY_INPUT_PIN, INPUT_PULLUP);
   ledcSetup(kFanPwmChannel, kFanPwmFrequency, kFanPwmResolution);
-  ledcAttachPin(kFanPwmPin, kFanPwmChannel);
+  ledcAttachPin(GN_FAN_PWM_PIN, kFanPwmChannel);
 
   failSafeOutputs();
   esp_task_wdt_init(kWatchdogSeconds, true);
@@ -474,7 +474,8 @@ void setup() {
 void loop() {
   esp_task_wdt_reset();
 
-  if (digitalRead(kEmergencyInputPin) == LOW) {
+  const bool emergencyActive = digitalRead(GN_EMERGENCY_INPUT_PIN) == (GN_EMERGENCY_ACTIVE_HIGH ? HIGH : LOW);
+  if (emergencyActive) {
     if (!emergencyLatched) Serial.println("emergency input latched");
     emergencyLatched = true;
     lightOverride.active = fanOverride.active = airPumpOverride.active = false;
