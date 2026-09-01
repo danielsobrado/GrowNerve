@@ -90,33 +90,49 @@ func clientKey(request *http.Request) string {
 	return clientKeyWithProxies(request, nil)
 }
 
-// clientKeyWithProxies trusts X-Forwarded-For only when the TCP peer is inside
-// an explicitly configured proxy network. This preserves spoofing resistance
-// while preventing every operator behind one reverse proxy sharing a bucket.
+func trustedIP(ip net.IP, trusted []*net.IPNet) bool {
+	for _, network := range trusted {
+		if network.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+// clientKeyWithProxies trusts forwarding data only when the direct TCP peer is
+// explicitly trusted. It then walks X-Forwarded-For from right to left, skipping
+// trusted proxy hops until it finds the client-facing untrusted address. This
+// prevents a client-supplied leftmost XFF value from creating fresh rate-limit
+// buckets when a reverse proxy appends instead of replacing the header.
 func clientKeyWithProxies(request *http.Request, trusted []*net.IPNet) string {
 	host, _, err := net.SplitHostPort(request.RemoteAddr)
 	if err != nil {
 		host = request.RemoteAddr
 	}
 	peer := net.ParseIP(host)
-	trustedPeer := false
-	for _, network := range trusted {
-		if peer != nil && network.Contains(peer) {
-			trustedPeer = true
-			break
-		}
+	if peer == nil {
+		return host
 	}
-	if trustedPeer {
-		for _, candidate := range strings.Split(request.Header.Get("X-Forwarded-For"), ",") {
-			if ip := net.ParseIP(strings.TrimSpace(candidate)); ip != nil {
-				return ip.String()
-			}
-		}
-	}
-	if peer != nil {
+	if !trustedIP(peer, trusted) {
 		return peer.String()
 	}
-	return host
+
+	chain := make([]net.IP, 0, 4)
+	for _, candidate := range strings.Split(request.Header.Get("X-Forwarded-For"), ",") {
+		if ip := net.ParseIP(strings.TrimSpace(candidate)); ip != nil {
+			chain = append(chain, ip)
+		}
+	}
+	if len(chain) == 0 {
+		return peer.String()
+	}
+
+	for index := len(chain) - 1; index >= 0; index-- {
+		if !trustedIP(chain[index], trusted) {
+			return chain[index].String()
+		}
+	}
+	return chain[0].String()
 }
 
 func isMutating(method string) bool {
