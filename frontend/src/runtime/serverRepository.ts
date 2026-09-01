@@ -2,7 +2,6 @@ import { emptyFarmData, type FarmCommand, type FarmData, type Measurement } from
 import type { CommandIntent } from "./simulator";
 import type { FarmRepository } from "./browserRepository";
 
-/** One aggregated interval of a channel's history. */
 export interface MeasurementBucket {
   started_at: string;
   average: number;
@@ -11,7 +10,6 @@ export interface MeasurementBucket {
   samples: number;
 }
 
-/** Bounds a history read. The server clamps anything beyond its own maximum. */
 export interface HistoryQuery {
   channelId: string;
   from?: Date;
@@ -21,24 +19,15 @@ export interface HistoryQuery {
 }
 
 export interface ServerRepositoryOptions {
-  /** Bearer credential. The server rejects unauthenticated API requests. */
-  token?: string;
-  /**
-   * Reconnect delay for the live-update stream, in milliseconds. Exposed so
-   * tests do not have to wait out a real backoff.
-   */
+  /** Read the current bearer credential for every request. */
+  token?: string | (() => string | undefined);
   reconnectDelay?: number;
 }
 
-/**
- * Talks to the Go server. Changes arrive over a server-sent-event stream rather
- * than by polling, so the UI reflects telemetry as it lands instead of up to a
- * poll interval late.
- */
 export class ServerFarmRepository implements FarmRepository {
   private readonly listeners = new Set<() => void>();
   private readonly options: ServerRepositoryOptions;
-  private etag?: string;
+  private version?: string;
   private streamAbort?: AbortController;
   private reconnectTimer?: ReturnType<typeof setTimeout>;
 
@@ -46,19 +35,23 @@ export class ServerFarmRepository implements FarmRepository {
     this.options = { reconnectDelay: 3000, ...options };
   }
 
+  private token(): string | undefined {
+    return typeof this.options.token === "function" ? this.options.token() : this.options.token;
+  }
+
   private headers(extra: Record<string, string> = {}): Record<string, string> {
     const headers: Record<string, string> = { Accept: "application/json", ...extra };
-    if (this.options.token) headers.Authorization = `Bearer ${this.options.token}`;
+    const token = this.token();
+    if (token) headers.Authorization = `Bearer ${token}`;
     return headers;
   }
 
-  /** Turns a problem-details response into a message worth showing a person. */
   private async failure(response: Response, fallback: string): Promise<Error> {
     try {
       const problem = await response.json() as { detail?: string; code?: string };
       if (problem.detail) return new Error(problem.detail);
     } catch {
-      // A non-JSON body is not itself the interesting failure; fall through.
+      // Non-problem responses fall through to the status-specific message.
     }
     if (response.status === 401) return new Error("Sign in again to continue.");
     if (response.status === 403) return new Error("Your role does not permit that action.");
@@ -68,19 +61,23 @@ export class ServerFarmRepository implements FarmRepository {
 
   async load(): Promise<FarmData | undefined> {
     const response = await fetch(`${this.baseURL}/api/v1/state`, { headers: this.headers() });
-    if (response.status === 204) return undefined;
+    if (response.status === 204) {
+      this.version = undefined;
+      return undefined;
+    }
     if (!response.ok) throw await this.failure(response, "Server state failed");
-    this.etag = response.headers.get("ETag") ?? undefined;
+    this.version = response.headers.get("X-Farm-Version") ?? undefined;
     return await response.json() as FarmData;
   }
 
   async replace(data: FarmData): Promise<void> {
     const headers = this.headers({ "Content-Type": "application/json" });
-    if (this.etag) headers["If-Match"] = this.etag;
+    if (this.version) headers["X-Farm-Version"] = this.version;
+    else headers["If-None-Match"] = "*";
     const response = await fetch(`${this.baseURL}/api/v1/state`, { method: "PUT", headers, body: JSON.stringify(data) });
-    if (response.status === 409) throw new Error("Farm state changed on the server; reload before saving");
+    if (response.status === 409 || response.status === 428) throw new Error("Farm state changed on the server; reload before saving");
     if (!response.ok) throw await this.failure(response, "Server state save failed");
-    this.etag = response.headers.get("ETag") ?? undefined;
+    this.version = response.headers.get("X-Farm-Version") ?? undefined;
     this.emit();
   }
 
@@ -101,23 +98,18 @@ export class ServerFarmRepository implements FarmRepository {
       headers: this.headers({ "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID() }),
       body: JSON.stringify({ targetChannelId: intent.targetChannelId, value: intent.value, reason: intent.reason }),
     });
-    // 422 is a safety refusal, which is a real answer the operator needs to see
-    // rather than a transport failure to retry.
     if (!response.ok && response.status !== 422) throw await this.failure(response, "Command failed");
     this.emit();
     return await response.json() as FarmCommand;
   }
 
-  /** Reads bounded history for one channel. */
   async history(query: HistoryQuery): Promise<Measurement[]> {
-    const url = this.historyURL(query);
-    const response = await fetch(url, { headers: this.headers() });
+    const response = await fetch(this.historyURL(query), { headers: this.headers() });
     if (!response.ok) throw await this.failure(response, "History failed");
     const payload = await response.json() as { measurements?: Measurement[] };
     return payload.measurements ?? [];
   }
 
-  /** Reads server-aggregated history, for charts spanning more than a few hours. */
   async historyBuckets(query: HistoryQuery & { bucketSeconds: number }): Promise<MeasurementBucket[]> {
     const response = await fetch(this.historyURL(query), { headers: this.headers() });
     if (!response.ok) throw await this.failure(response, "History failed");
@@ -143,12 +135,6 @@ export class ServerFarmRepository implements FarmRepository {
     };
   }
 
-  /**
-   * Opens the change stream over fetch rather than EventSource. EventSource
-   * cannot send an Authorization header, and putting a credential in the URL
-   * would leak it into proxy and server logs; reading the stream with fetch
-   * keeps the token where every other request carries it.
-   */
   private openStream(): void {
     if (this.streamAbort || typeof fetch === "undefined") return;
     const abort = new AbortController();
@@ -170,8 +156,6 @@ export class ServerFarmRepository implements FarmRepository {
         const { done, value } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
-        // Events are separated by a blank line; anything after the last one is a
-        // partial frame that has to wait for more bytes.
         const frames = buffer.split("\n\n");
         buffer = frames.pop() ?? "";
         for (const frame of frames) {
@@ -189,8 +173,6 @@ export class ServerFarmRepository implements FarmRepository {
     if (this.streamAbort !== abort) return;
     this.streamAbort = undefined;
     if (this.listeners.size === 0) return;
-    // A dropped stream means the client may have missed a change, so a refresh
-    // is scheduled alongside the reconnect rather than waiting for the next one.
     this.emit();
     console.warn("GrowNerve live updates interrupted; reconnecting", error);
     this.reconnectTimer = setTimeout(() => this.openStream(), this.options.reconnectDelay);
