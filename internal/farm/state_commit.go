@@ -42,11 +42,11 @@ func (committer *PostgresStateCommitter) CommitState(ctx context.Context, state 
 		return NoVersion, err
 	}
 
-	var measurements []telemetry.Measurement
-	if raw, present := object["measurements"]; present {
-		if err := json.Unmarshal(raw, &measurements); err != nil {
-			return NoVersion, telemetry.ErrInvalidMeasurement
-		}
+	measurements, err := importedMeasurements(object, document)
+	if err != nil {
+		return NoVersion, err
+	}
+	if _, present := object["measurements"]; present {
 		stripped, err := ReplaceKeys(state, map[string]any{"measurements": []telemetry.Measurement{}})
 		if err != nil {
 			return NoVersion, err
@@ -75,6 +75,45 @@ func (committer *PostgresStateCommitter) CommitState(ctx context.Context, state 
 		return NoVersion, err
 	}
 	return version, nil
+}
+
+func importedMeasurements(object map[string]json.RawMessage, document registry.Document) ([]telemetry.Measurement, error) {
+	raw, present := object["measurements"]
+	if !present {
+		return nil, nil
+	}
+	var measurements []telemetry.Measurement
+	if err := json.Unmarshal(raw, &measurements); err != nil {
+		return nil, telemetry.ErrInvalidMeasurement
+	}
+
+	channels := make(map[string]registry.Channel, len(document.Channels))
+	for _, channel := range document.Channels {
+		channels[channel.ID] = channel
+	}
+	devices := make(map[string]struct{}, len(document.Devices))
+	for _, device := range document.Devices {
+		devices[device.ID] = struct{}{}
+	}
+
+	for _, measurement := range measurements {
+		if err := measurement.Validate(); err != nil {
+			return nil, telemetry.ErrInvalidMeasurement
+		}
+		channel, found := channels[measurement.ChannelID]
+		if !found {
+			return nil, telemetry.ErrInvalidMeasurement
+		}
+		if channel.Unit != "" && measurement.Unit != channel.Unit {
+			return nil, telemetry.ErrInvalidMeasurement
+		}
+		if measurement.SourceDeviceID != "" {
+			if _, found := devices[measurement.SourceDeviceID]; !found {
+				return nil, telemetry.ErrInvalidMeasurement
+			}
+		}
+	}
+	return measurements, nil
 }
 
 func saveStateWithQueries(ctx context.Context, queries *gen.Queries, state json.RawMessage, expected int64) (int64, error) {
