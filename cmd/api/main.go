@@ -18,6 +18,7 @@ import (
 	"github.com/jdanielsobrado/grownerve/internal/platform/database"
 	"github.com/jdanielsobrado/grownerve/internal/platform/httpx"
 	platformmiddleware "github.com/jdanielsobrado/grownerve/internal/platform/middleware"
+	mqttbridge "github.com/jdanielsobrado/grownerve/internal/platform/mqtt"
 )
 
 var version = "dev"
@@ -49,6 +50,11 @@ func run() error {
 		defer cancel()
 		return pool.Ping(ctx)
 	})
+	runtimeContext, cancelRuntime := context.WithCancel(context.Background())
+	defer cancelRuntime()
+	stateStore := farm.NewPostgresStore(pool)
+	bridge := mqttbridge.NewBridge(cfg.MQTT.Broker, cfg.MQTT.ClientID, stateStore, logger)
+	bridge.Start(runtimeContext)
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health/live", health.Live)
 	mux.HandleFunc("GET /health/ready", health.Ready)
@@ -56,7 +62,7 @@ func run() error {
 		writer.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(writer).Encode(map[string]string{"version": version})
 	})
-	mux.Handle("/api/v1/", farm.NewHandler(farm.NewPostgresStore(pool)))
+	mux.Handle("/api/v1/", farm.NewHandler(stateStore, farm.WithCommandPublisher(bridge)))
 	handler := platformmiddleware.Chain(mux, platformmiddleware.Options{AllowedOrigins: cfg.Server.CORSAllowedOrigins, Logger: logger})
 	server := &http.Server{Addr: cfg.Server.Address, Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 35 * time.Second, WriteTimeout: 35 * time.Second, IdleTimeout: 90 * time.Second}
 	serverErrors := make(chan error, 1)

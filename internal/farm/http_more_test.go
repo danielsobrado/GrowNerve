@@ -8,6 +8,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/jdanielsobrado/grownerve/internal/deviceprotocol"
 )
 
 type failingStore struct {
@@ -133,5 +136,24 @@ func TestMemoryStoreCopiesState(t *testing.T) {
 	again, _ := store.Load(context.Background())
 	if string(again) != `{"a":1}` {
 		t.Fatalf("state aliased: %s", again)
+	}
+}
+
+type recordingPublisher struct{ called bool }
+
+func (publisher *recordingPublisher) PublishCommand(context.Context, string, deviceprotocol.Command) error {
+	publisher.called = true
+	return nil
+}
+
+func TestAcceptedCommandPublishesAfterPersistence(t *testing.T) {
+	store := NewMemoryStore()
+	_ = store.Save(context.Background(), json.RawMessage(commandStateJSON(true, 25, 100)))
+	publisher := &recordingPublisher{}
+	handler := NewHandler(store, WithCommandPublisher(publisher))
+	body := `{"targetChannelId":"01990a20-6a00-7000-8000-000000000001","value":50,"reason":"test","expiresAt":"` + time.Now().Add(time.Minute).UTC().Format(time.RFC3339Nano) + `"}`
+	response := makeRequest(handler, http.MethodPost, "/api/v1/commands", body, "application/json")
+	if response.Code != http.StatusAccepted || !publisher.called || !strings.Contains(response.Body.String(), `"status":"published"`) {
+		t.Fatalf("response = %d %s, called=%v", response.Code, response.Body.String(), publisher.called)
 	}
 }

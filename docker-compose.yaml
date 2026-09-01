@@ -51,6 +51,15 @@ services:
       test: ["CMD", "/app/grownerve-api"]
       disable: true
 
+  simulator:
+    profiles: ["simulator"]
+    image: golang:1.25-alpine
+    working_dir: /src
+    volumes: [".:/src"]
+    command: ["go", "run", "./cmd/device-simulator", "-broker", "tcp://mosquitto:1883"]
+    depends_on:
+      mosquitto: { condition: service_healthy }
+
 volumes:
   postgres-data:
   mosquitto-data:

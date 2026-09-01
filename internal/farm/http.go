@@ -1,6 +1,7 @@
 package farm
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -11,17 +12,31 @@ import (
 
 	"github.com/google/uuid"
 	commanddomain "github.com/jdanielsobrado/grownerve/internal/command"
+	"github.com/jdanielsobrado/grownerve/internal/deviceprotocol"
 )
 
 const maximumStateBytes = 32 << 20
 
 type Handler struct {
-	store Store
-	mu    sync.Mutex
+	store     Store
+	mu        sync.Mutex
+	publisher CommandPublisher
 }
 
-func NewHandler(store Store) http.Handler {
+type CommandPublisher interface {
+	PublishCommand(context.Context, string, deviceprotocol.Command) error
+}
+type HandlerOption func(*Handler)
+
+func WithCommandPublisher(publisher CommandPublisher) HandlerOption {
+	return func(handler *Handler) { handler.publisher = publisher }
+}
+
+func NewHandler(store Store, options ...HandlerOption) http.Handler {
 	handler := &Handler{store: store}
+	for _, option := range options {
+		option(handler)
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/state", handler.getState)
 	mux.HandleFunc("PUT /api/v1/state", handler.putState)
@@ -169,6 +184,18 @@ func (handler *Handler) createCommand(writer http.ResponseWriter, request *http.
 	if err := handler.store.Save(request.Context(), nextState); err != nil {
 		writeProblem(writer, request, http.StatusInternalServerError, "COMMAND_WRITE_FAILED", "Command could not be persisted")
 		return
+	}
+	if safetyError == nil && handler.publisher != nil {
+		protocolCommand := deviceprotocol.Command{ProtocolVersion: deviceprotocol.Version, CommandID: record["id"].(string), TargetChannelID: intent.TargetChannelID, Type: record["command_type"].(string), Value: json.RawMessage(intent.Value), IssuedAt: now, ExpiresAt: expiresAt}
+		if publishErr := handler.publisher.PublishCommand(request.Context(), channel.DeviceID, protocolCommand); publishErr == nil {
+			record["status"] = "published"
+			record["updated_at"] = time.Now().UTC()
+			encoded, _ = json.Marshal(record)
+			state.Commands[len(state.Commands)-1] = encoded
+			stateObject["commands"], _ = json.Marshal(state.Commands)
+			nextState, _ = json.Marshal(stateObject)
+			_ = handler.store.Save(request.Context(), nextState)
+		}
 	}
 	writer.Header().Set("Content-Type", "application/json")
 	if safetyError != nil {
