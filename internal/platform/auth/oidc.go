@@ -18,25 +18,21 @@ import (
 	"time"
 )
 
-// OIDCConfig describes the identity provider and how its claims map to roles.
 type OIDCConfig struct {
 	Issuer      string
 	Audience    string
 	RoleClaim   string
 	RoleMapping map[string]Role
 	DefaultRole Role
-	// Leeway absorbs small clock differences between this server and the issuer.
-	Leeway time.Duration
+	Leeway      time.Duration
 }
 
-// OIDCAuthenticator verifies signed ID/access tokens against the issuer's
-// published keys. Keys are fetched lazily and cached, and a token naming an
-// unknown key forces exactly one refresh so rotation heals without a restart.
 type OIDCAuthenticator struct {
 	config OIDCConfig
 	client *http.Client
 
 	mu          sync.RWMutex
+	refreshMu   sync.Mutex
 	keys        map[string]crypto.PublicKey
 	jwksURI     string
 	lastRefresh time.Time
@@ -44,8 +40,6 @@ type OIDCAuthenticator struct {
 
 func (*OIDCAuthenticator) Mode() string { return "oidc" }
 
-// minimumRefreshInterval stops a stream of tokens with bogus key ids from
-// turning into a request flood against the identity provider.
 const minimumRefreshInterval = 30 * time.Second
 
 func NewOIDCAuthenticator(config OIDCConfig, client *http.Client) (*OIDCAuthenticator, error) {
@@ -103,28 +97,22 @@ type oidcClaims struct {
 
 func (authenticator *OIDCAuthenticator) roleOf(claims *oidcClaims) (Role, error) {
 	value, present := claims.raw[authenticator.config.RoleClaim]
-	if !present {
-		if authenticator.config.DefaultRole.Valid() {
-			return authenticator.config.DefaultRole, nil
-		}
-		return "", fmt.Errorf("%w: token has no %s claim", ErrUnknownRole, authenticator.config.RoleClaim)
-	}
-	for _, candidate := range flattenClaim(value) {
-		if mapped, found := authenticator.config.RoleMapping[candidate]; found {
-			return mapped, nil
-		}
-		if role, err := ParseRole(candidate); err == nil {
-			return role, nil
+	if present {
+		for _, candidate := range flattenClaim(value) {
+			if mapped, found := authenticator.config.RoleMapping[candidate]; found {
+				return mapped, nil
+			}
 		}
 	}
 	if authenticator.config.DefaultRole.Valid() {
 		return authenticator.config.DefaultRole, nil
 	}
+	if !present {
+		return "", fmt.Errorf("%w: token has no %s claim", ErrUnknownRole, authenticator.config.RoleClaim)
+	}
 	return "", ErrUnknownRole
 }
 
-// flattenClaim normalises a role claim that may arrive as a string or as a list
-// of group names.
 func flattenClaim(value any) []string {
 	switch typed := value.(type) {
 	case string:
@@ -157,8 +145,6 @@ func (authenticator *OIDCAuthenticator) verify(ctx context.Context, token string
 	if json.Unmarshal(headerBytes, &header) != nil {
 		return nil, ErrUnauthenticated
 	}
-	// "none" and symmetric algorithms are refused outright: accepting them is the
-	// classic JWT bypass.
 	if header.Algorithm != "RS256" && header.Algorithm != "RS384" && header.Algorithm != "RS512" &&
 		header.Algorithm != "ES256" && header.Algorithm != "ES384" {
 		return nil, fmt.Errorf("%w: unsupported token algorithm %q", ErrUnauthenticated, header.Algorithm)
@@ -211,7 +197,6 @@ func (authenticator *OIDCAuthenticator) validateClaims(claims *oidcClaims) error
 	return fmt.Errorf("%w: token audience does not include this deployment", ErrUnauthenticated)
 }
 
-// decodeAudience accepts both the string and array forms permitted by RFC 7519.
 func decodeAudience(raw json.RawMessage) ([]string, error) {
 	if len(raw) == 0 {
 		return nil, fmt.Errorf("%w: token has no audience", ErrUnauthenticated)
