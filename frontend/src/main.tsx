@@ -2,7 +2,7 @@ import { StrictMode, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { App, defaultBrowserRepository } from "./App";
 import {
-  beginOIDCSignIn, completeOIDCCallback, currentAccessToken, oidcConfigured, storeLocalToken,
+  beginOIDCSignIn, clearAccessToken, completeOIDCCallback, currentAccessToken, oidcConfigured, storeLocalToken,
 } from "./runtime/oidc";
 import { ServerFarmRepository } from "./runtime/serverRepository";
 import "./index.css";
@@ -55,7 +55,13 @@ async function bootstrap() {
     return;
   }
 
-  const repository = new ServerFarmRepository(import.meta.env.VITE_API_URL || "http://127.0.0.1:8080", { token: currentAccessToken });
+  const repository = new ServerFarmRepository(import.meta.env.VITE_API_URL || "http://127.0.0.1:8080", {
+    token: currentAccessToken,
+    onUnauthorized: () => {
+      clearAccessToken();
+      location.reload();
+    },
+  });
   root.render(<StrictMode><App repository={repository} runtimeMode="server" /></StrictMode>);
 }
 
