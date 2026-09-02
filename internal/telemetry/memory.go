@@ -50,13 +50,16 @@ func newerMeasurement(left, right Measurement) bool {
 }
 
 func (store *MemoryStore) Append(_ context.Context, measurements []Measurement) (int, error) {
+	for _, measurement := range measurements {
+		if err := measurement.Validate(); err != nil {
+			return 0, err
+		}
+	}
+
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	written := 0
 	for _, measurement := range measurements {
-		if err := measurement.Validate(); err != nil {
-			return written, err
-		}
 		key := duplicateKey(measurement)
 		if _, seen := store.byKey[key]; seen {
 			continue
