@@ -39,6 +39,7 @@ type Device struct {
 
 type Channel struct {
 	ID                string   `json:"id"`
+	DeviceID          string   `json:"device_id"`
 	EntityType        string   `json:"entity_type"`
 	EntityID          string   `json:"entity_id"`
 	Key               string   `json:"key"`
@@ -83,10 +84,20 @@ func (document Document) Validate() error {
 	}
 	kinds := map[string]bool{"measurement": true, "state": true, "command": true, "counter": true}
 	valueTypes := map[string]bool{"number": true, "boolean": true, "enum": true}
+	deviceIDs := make(map[string]bool, len(document.Devices))
+	for _, device := range document.Devices {
+		if device.ID == "" {
+			return &InvalidError{"every device needs an id"}
+		}
+		deviceIDs[device.ID] = true
+	}
 	seenKeys := map[string]string{}
 	for _, channel := range document.Channels {
 		if channel.ID == "" || channel.Key == "" {
 			return &InvalidError{"every channel needs an id and a key"}
+		}
+		if channel.DeviceID != "" && !deviceIDs[channel.DeviceID] {
+			return &InvalidError{fmt.Sprintf("channel %q references unknown device %q", channel.Key, channel.DeviceID)}
 		}
 		if !kinds[channel.Kind] {
 			return &InvalidError{fmt.Sprintf("channel %q has unsupported kind %q", channel.Key, channel.Kind)}
