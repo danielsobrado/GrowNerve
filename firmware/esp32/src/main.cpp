@@ -17,12 +17,14 @@
 namespace {
 
 constexpr int kProtocolVersion = 1;
-constexpr const char *kFirmwareVersion = "0.1.4";
+constexpr const char *kFirmwareVersion = "0.1.5";
 constexpr uint8_t kFanPwmChannel = 0;
 constexpr uint32_t kFanPwmFrequency = 25000;
 constexpr uint8_t kFanPwmResolution = 8;
 constexpr uint32_t kWatchdogSeconds = 30;
 constexpr uint32_t kReconnectIntervalMillis = 5000;
+constexpr uint32_t kMaximumCommandLifetimeSeconds = 300;
+constexpr uint32_t kMaximumFutureClockSkewSeconds = 60;
 constexpr time_t kMinimumTrustedEpoch = 1704067200;  // 2024-01-01 UTC
 
 WiFiClientSecure secureClient;
@@ -333,12 +335,24 @@ void handleCommand(const JsonDocument &document) {
     publishCommandAck(commandId, "rejected", "INVALID_COMMAND_TIME");
     return;
   }
+  if (expiresAt <= issuedAt) {
+    publishCommandAck(commandId, "rejected", "INVALID_COMMAND_TIME");
+    return;
+  }
+  if (expiresAt - issuedAt > kMaximumCommandLifetimeSeconds) {
+    publishCommandAck(commandId, "rejected", "COMMAND_TTL_TOO_LONG");
+    return;
+  }
   if (expiresAt <= nowEpoch) {
     publishCommandAck(commandId, "rejected", "COMMAND_EXPIRED");
     return;
   }
-  if (issuedAt > nowEpoch + 60) {
+  if (issuedAt > nowEpoch + kMaximumFutureClockSkewSeconds) {
     publishCommandAck(commandId, "rejected", "COMMAND_FROM_FUTURE");
+    return;
+  }
+  if (issuedAt < nowEpoch - kMaximumCommandLifetimeSeconds) {
+    publishCommandAck(commandId, "rejected", "COMMAND_STALE");
     return;
   }
 
@@ -347,7 +361,7 @@ void handleCommand(const JsonDocument &document) {
     value = document["value"].as<bool>() ? 100.0f : 0.0f;
   } else if (strcmp(type, "set_percent") == 0 && document["value"].is<float>()) {
     value = document["value"].as<float>();
-    if (value < 0 || value > 100) {
+    if (!isfinite(value) || value < 0 || value > 100) {
       publishCommandAck(commandId, "rejected", "COMMAND_VALUE_OUT_OF_RANGE");
       return;
     }
@@ -361,9 +375,10 @@ void handleCommand(const JsonDocument &document) {
     return;
   }
 
-  uint32_t remainingSeconds = (uint32_t)(expiresAt - nowEpoch);
-  uint32_t localLimit = settings.commandTimeoutSeconds > 0 ? settings.commandTimeoutSeconds : 300U;
-  uint32_t durationSeconds = min(remainingSeconds, localLimit);
+  const uint32_t remainingSeconds = (uint32_t)(expiresAt - nowEpoch);
+  const uint32_t configuredLimit = settings.commandTimeoutSeconds > 0 ? settings.commandTimeoutSeconds : kMaximumCommandLifetimeSeconds;
+  const uint32_t localLimit = min(configuredLimit, kMaximumCommandLifetimeSeconds);
+  const uint32_t durationSeconds = min(remainingSeconds, localLimit);
   if (durationSeconds == 0) {
     publishCommandAck(commandId, "rejected", "COMMAND_EXPIRED");
     return;
