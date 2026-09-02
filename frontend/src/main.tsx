@@ -7,6 +7,7 @@ import {
 import { ServerFarmRepository } from "./runtime/serverRepository";
 import "./index.css";
 import "./control-room.css";
+import "./control-room-components.css";
 
 const runtimeMode = (import.meta.env.VITE_RUNTIME_MODE === "server" ? "server" : "browser") as "server" | "browser";
 
