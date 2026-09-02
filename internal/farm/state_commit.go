@@ -111,6 +111,9 @@ func importedMeasurements(object map[string]json.RawMessage, document registry.D
 			if _, found := devices[measurement.SourceDeviceID]; !found {
 				return nil, telemetry.ErrInvalidMeasurement
 			}
+			if channel.DeviceID != "" && measurement.SourceDeviceID != channel.DeviceID {
+				return nil, telemetry.ErrInvalidMeasurement
+			}
 		}
 	}
 	return measurements, nil
