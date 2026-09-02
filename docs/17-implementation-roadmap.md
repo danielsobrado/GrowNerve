@@ -6,6 +6,14 @@ Build GrowNerve as a sequence of end-to-end slices around the real pilot install
 
 The browser-only runtime is built early so GitHub Pages is a real usable deployment target rather than a late demo adapter.
 
+## How to read this roadmap now
+
+This document began as a build sequence, but the repository has already implemented much of the original V0 baseline. `22-implementation-status.md` is authoritative for what exists today.
+
+In particular, the selectable procedural digital twin already exists. The new JSON component/plugin work is therefore a **refactor and extensibility track over working code**, not a claim that component schemas were implemented before the current Three.js scene.
+
+The component track is labeled `6R` below to make that distinction explicit.
+
 ## Phase 0 — Repository and foundations
 
 Deliver:
@@ -152,138 +160,150 @@ Exit criteria:
 
 - simulated unsafe values create useful, deduplicated alerts in both runtimes
 
-## Phase 6A — Component specification and runtime
+## Phase 6 — 3D digital twin baseline
 
-The component contract is implemented **before** the Three.js scene. Three.js must consume the contract rather than defining it.
+This baseline is already represented in the current implementation. See `12-3d-digital-twin.md` and `22-implementation-status.md`.
+
+Baseline capabilities:
+
+- React Three Fiber / Three.js scene
+- WebGPU-first renderer with WebGL fallback
+- procedural reference geometry
+- scene bindings using `(entity_type, entity_id)`
+- shared 2D/3D selection
+- raycast picking
+- HTML tooltips
+- radial actions
+- live equipment/reservoir/plant state
+
+The current implementation intentionally becomes the compatibility fixture for the component refactor below.
+
+## Phase 6R1 — Component contract and compatibility registry
 
 See `24-component-plugin-system.md`.
 
 Deliver:
 
-- versioned component/plugin/farm-layout JSON Schemas
-- stable component IDs with separate SemVer versions
-- normalized component model
-- component definition versus instance model
-- capabilities
-- logical telemetry/control semantics
-- ports and anchors
-- primitive model definitions
-- GLB asset metadata contract
-- assembly definitions
-- semantic/referential/asset validation
-- schema migration framework
-- built-in component registry
-- imported/local component registry
-- deterministic component dependency/version resolution
-- browser IndexedDB storage for imported component definitions/assets
-- sample valid/invalid component packs
-
-Initial built-in definitions cover the reference installation:
-
-```text
-grow tent
-LED panel
-circulation fan
-30 L-class rectangular reservoir
-net pot
-lettuce growth stages
-air pump
-air stone
-ESP32/controller enclosure
-air temperature/RH sensor
-water temperature sensor
-water level sensor
-```
+- JSON Schema 2020-12 component/pack/component-ref contracts
+- `snake_case` JSON matching the existing portable format
+- stable component IDs with separate SemVer revisions and SHA-256 digest
+- channel-slot model aligned with the existing `Channel` domain type
+- small capability vocabulary
+- primitive model definitions matching current procedural geometry
+- built-in component revisions for every current `profile`
+- exact deterministic profile -> component-ref migration
+- valid/invalid schema fixtures
 
 Exit criteria:
 
-- the complete pilot layout can be represented without Three.js-specific component JSON
-- built-in and imported component definitions resolve through the same registry interface
+- every current pilot scene entry maps to one exact built-in component revision
+- no second operational instance identity is introduced
+- current v1 scene data can be normalized without losing `(entity_type, entity_id)` identity
 - component conflicts are explicit rather than last-write-wins
-- invalid packs/assets are rejected before installation
-- a primitive-only reference layout loads in both server and browser runtime services
 
-## Phase 6B — 3D digital twin V0
+## Phase 6R2 — Additive scene migration and generic primitive renderer
 
 Deliver:
 
-- Three.js WebGPU-first scene foundation
-- generic component-definition-to-render-model adapter
+- additive `SceneEntity.component_ref`
+- optional rotation/configuration/channel bindings
+- one-release compatibility fallback for old `profile` layouts
+- generic definition-to-render-model adapter
 - primitive geometry renderer
-- GLB loading/cache
-- reference 3 x 3 tent scene assembled from registered component definitions/instances
-- entity binding index
-- shared 2D/3D selection
-- raycast picking
-- HTML tooltips
-- entity inspector
-- capability-driven radial menus
-- alert highlight/focus
-- plant positions and discrete growth visuals
-- live reservoir/equipment/sensor status effects
+- normalized render-state behaviors for dynamic state such as reservoir fill and fan rotation
+- capability/domain-driven radial action resolver replacing `profileActions`
 
 Exit criteria:
 
-- renderer does not contain pilot-specific branches such as `if componentType === "pump"` for normal behavior
-- every pilot component can be selected in 3D
-- selecting an alert can focus the affected object
-- tooltips display live/freshness-aware data
-- radial actions resolve from component capability plus domain permission/state
-- the same scene works on GitHub Pages using IndexedDB/simulator data
+- the current pilot remains visually and semantically equivalent after migration
+- renderer selection no longer branches on pilot profiles such as `binding.profile === "fan"`
+- selecting an entity resolves the same UUID before and after migration
+- command/safety logic remains outside component definitions
 
-## Phase 6C — Component pack management and farm-layout authoring
+## Phase 6R3 — Registry persistence and portable archive v2
 
 Deliver:
 
-- component pack ZIP import/export
-- install/uninstall and version/conflict handling
-- farm-layout instance creation/movement/configuration
-- assembly instantiate/save workflows
-- port compatibility validation
+- browser IndexedDB stores for immutable component revisions/assets separate from the existing farm snapshot
+- server-side component registry storage separate from the whole farm document
+- exact dependency lock
+- `.grownerve.json` schema v1 -> v2 migration
+- missing dependency UX
+- optional bundled ZIP export for local/community component packs
+- transactional pack installation with digest/path/size validation
+
+Exit criteria:
+
+- old v1 archives still import through migration
+- large GLB assets are not rewritten on every browser farm edit
+- farm document compare-and-swap remains the concurrency boundary for scene bindings
+- exported projects reproduce exact component revisions or report missing dependencies
+
+## Phase 6R4 — GLB and component-pack support
+
+Deliver:
+
+- GLB inspection/validation/cache
+- pack ZIP import/export
+- local component browsing
+- imported component rendering through the same registry path as built-ins
+- configured model/texture/file budgets
+
+Do not add arbitrary JavaScript, WebAssembly, shaders, remote asset hot-links, or a required marketplace.
+
+Exit criteria:
+
+- a user can import a valid third-party declarative component pack without code changes
+- invalid/malicious packs fail before installation
+- imported components work in both server and browser rendering modes
+
+## Phase 6R5 — Ports, anchors, connections, and lightweight placement
+
+Deliver only when a real layout-editing workflow needs them:
+
+- physical topology ports
+- spatial anchors
+- explicit compatibility validation
 - connection persistence/visualization where useful
-- anchor metadata and simple snap placement foundation
-- bundled project export path for local component assets
+- simple snap placement
+- assemblies where they remove real repeated work
 
 Do not build a general CAD editor.
 
-Exit criteria:
-
-- a user can import a valid third-party component pack without code changes
-- imported components behave like built-ins in the 3D twin
-- an exported farm can preserve exact component dependencies and reload deterministically
-
-## Phase 6D — MCP component authoring proof
+## Phase 6R6 — MCP component authoring proof
 
 See `25-mcp-component-authoring.md`.
 
-Start with the smallest useful MCP surface:
+The first proof uses the current Go server and MCP 2026-07-28 through an integrated `/mcp` endpoint.
+
+Start with:
 
 ```text
-components.schema
-components.search
+components.list
+components.get
 components.validate
 components.create
 farms.get_layout
-farms.add_component
+farms.set_component
 farms.validate_layout
 ```
 
 Deliver:
 
-- read-only component/schema discovery
-- structured validation errors
-- local declarative component creation
-- primitive-model authoring
-- farm-layout read/add/validate operations
-- optimistic-concurrency handling for farm changes
-- audit source metadata for MCP mutations
+- deterministic read-only registry/schema discovery
+- structured JSON Schema 2020-12 tool inputs/outputs
+- primitive immutable component creation
+- farm-layout binding mutation using the existing farm compare-and-swap version
+- current viewer/manager/admin authorization boundaries
+- audit source metadata for MCP writes
 
 Exit criteria:
 
 - an MCP client can create a valid primitive component without generating Three.js code
-- the MCP-created component can be placed in the reference layout and rendered through the normal registry/renderer path
-- MCP and UI validation accept/reject the same fixtures
-- no MCP operation bypasses component validation, farm concurrency, authorization, or command safety
+- the component can be bound to an existing pilot entity without creating a second identity
+- MCP and normal validation paths accept/reject the same fixtures
+- stale farm versions conflict rather than overwrite
+- no MCP operation bypasses authorization, component validation, or command safety
 
 ## Phase 7 — Low-risk control
 
@@ -382,16 +402,15 @@ Later work:
 
 ## Later extensibility work
 
-After the local component-pack and MCP contracts are proven against real use, consider:
+After local packs and MCP are proven against real use, consider:
 
 - optional remote component catalog
-- pack signing/trust metadata
+- signing/trust metadata
 - publisher tooling
-- MCP asset inspection/GLB attachment
-- MCP assemblies and project import/export
-- richer anchor snapping/editor ergonomics
+- richer MCP asset/draft workflows
+- richer assembly/editor ergonomics
 
-None of these is required to validate the V0 architecture.
+None of these is required to validate the component architecture.
 
 ## Prioritization rule
 
