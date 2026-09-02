@@ -112,6 +112,15 @@
   background: rgba(121, 201, 107, .15);
 }
 
+.gn-logo,
+.gn-loading-mark,
+.gn-welcome-brand > div {
+  color: #8ddd7b;
+  background: linear-gradient(145deg, #111a14, #0c120e);
+  border: 1px solid #29412d;
+  box-shadow: 0 10px 26px -18px rgba(94, 189, 99, .75), 0 1px 0 rgba(255, 255, 255, .03) inset;
+}
+
 .gn-mobile-close,
 .gn-menu {
   color: #aebbb2;
