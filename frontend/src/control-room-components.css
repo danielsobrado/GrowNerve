@@ -1,0 +1,145 @@
+.gn-equipment {
+  color: var(--ink);
+  background: #0d130f;
+  border-color: #222d26;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, .015) inset;
+}
+
+.gn-equipment:hover {
+  background: #111914;
+  border-color: #314035;
+}
+
+.gn-equipment > div {
+  color: var(--green-strong);
+}
+
+.gn-equipment > span {
+  color: var(--muted);
+}
+
+.gn-equipment > strong {
+  color: #e8f0ea;
+  font-variant-numeric: tabular-nums;
+}
+
+.gn-chart .recharts-cartesian-grid line {
+  stroke: #263129;
+}
+
+.gn-chart .recharts-cartesian-axis-line,
+.gn-chart .recharts-cartesian-axis-tick-line {
+  stroke: #344139;
+}
+
+.gn-chart .recharts-cartesian-axis-tick text {
+  fill: #76857b;
+}
+
+.gn-chart .recharts-tooltip-wrapper > div {
+  color: #dce7df !important;
+  background: rgba(10, 16, 12, .96) !important;
+  border: 1px solid #2c3a30 !important;
+  border-radius: 8px !important;
+  box-shadow: 0 18px 36px -24px #000;
+}
+
+.gn-timeline article:not(:last-child) > span::after {
+  background: #28352c;
+}
+
+.gn-timeline article > span {
+  background: #78c56e;
+  box-shadow: 0 0 0 3px rgba(121, 201, 107, .1), 0 0 10px rgba(121, 201, 107, .16);
+}
+
+.gn-list-row time,
+.gn-grow-foot,
+.gn-grow-foot b {
+  color: #7f8d84;
+}
+
+.gn-grow-foot b {
+  color: #cbd6ce;
+}
+
+.gn-severity {
+  box-shadow: 0 0 10px rgba(225, 109, 100, .24);
+}
+
+.gn-severity.warning {
+  box-shadow: 0 0 10px rgba(215, 160, 73, .24);
+}
+
+.gn-device-control input[type="range"] {
+  accent-color: var(--green-strong);
+}
+
+.gn-note {
+  color: #cbd6ce;
+}
+
+.gn-error {
+  color: #ef8179;
+}
+
+.gn-settings-list dd,
+.gn-device-health strong,
+.gn-rule-body dd {
+  color: #ced9d1;
+}
+
+.gn-tree button > span:last-child,
+.gn-device-health span,
+.gn-rule-body dt {
+  color: var(--muted);
+}
+
+.gn-safety-copy > svg {
+  filter: drop-shadow(0 0 8px rgba(121, 201, 107, .18));
+}
+
+.gn-welcome-card p {
+  color: var(--muted);
+}
+
+.gn-welcome-card strong {
+  color: #e3ece5;
+}
+
+.gn-welcome-card.featured > span {
+  color: #9be28c;
+  background: rgba(121, 201, 107, .15);
+}
+
+.gn-mobile-close,
+.gn-menu {
+  color: #aebbb2;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #2c3a31 transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: #2a372f;
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: #3a4a40;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
