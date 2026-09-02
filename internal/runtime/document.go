@@ -29,10 +29,16 @@ type deviceRecord struct {
 	Name                 string          `json:"name"`
 	Type                 string          `json:"type"`
 	Online               bool            `json:"online"`
+	Simulated            bool            `json:"simulated"`
+	OutputPercent        *float64        `json:"output_percent,omitempty"`
+	State                *bool           `json:"state,omitempty"`
 	LastHeartbeat        string          `json:"last_heartbeat"`
+	LastDeviceObservedAt string          `json:"last_device_observed_at,omitempty"`
+	FirmwareVersion      string          `json:"firmware_version"`
 	ActiveConfigVersion  string          `json:"active_config_version"`
 	DesiredConfig        json.RawMessage `json:"desired_config,omitempty"`
 	DesiredConfigVersion string          `json:"desired_config_version,omitempty"`
+	LastConfigResult     map[string]any  `json:"last_config_result,omitempty"`
 }
 
 type channelRecord struct {
