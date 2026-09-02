@@ -92,13 +92,15 @@ The first version must remain useful without automatic nutrient dosing. Chemistr
 - **Declarative plugins:** planned V0 component packs contain validated definitions/assets and do not execute arbitrary plugin code.
 - **Taxonomy over hard-coded types:** category is for discovery, subtype describes the specific family, and product-controlled capabilities plus real domain/channel bindings determine behavior.
 - **One telemetry model:** reusable visual components bind to existing logical `Channel` UUIDs rather than creating a parallel sensor/control model.
+- **Commerce is optional and isolated:** planned product/referral monetization uses a separate commerce service; no farm/control feature depends on it and the service receives no MQTT/farm-database credentials.
+- **Technical truth before commercial incentives:** compatibility is evaluated independently of affiliate payout; sponsored results are separate and labeled.
 - **One UI:** server-backed and browser-only deployments use the same screens, entity selection, 3D twin, and interaction model.
 - **Typed domain:** use explicit agricultural and control concepts rather than a generic everything-is-an-asset database.
 - **Event history:** meaningful farm actions are immutable historical events.
 - **Telemetry is separate:** high-volume measurements are not stored as ordinary farm events.
 - **Human before autonomy:** recommendations precede automatic dosing.
-- **KISS:** one Go server, one PostgreSQL database, one MQTT broker, one React application until scaling proves a need for more.
-- **SOLID boundaries:** domain logic does not depend on MQTT, HTTP, PostgreSQL, Three.js, MCP, or hardware implementations.
+- **KISS:** one farm/control Go server, one PostgreSQL database, one MQTT broker, one React application until scaling proves a need for more. The planned commerce server is a deliberate external commercial boundary, not a split of farm-control logic.
+- **SOLID boundaries:** domain logic does not depend on MQTT, HTTP, PostgreSQL, Three.js, MCP, commerce services, or hardware implementations.
 - **Fail closed for dangerous control:** stale sensors, low water, offline devices, or violated limits inhibit hazardous actions.
 
 ## Current stack
@@ -139,7 +141,7 @@ The first version must remain useful without automatic nutrient dosing. Chemistr
 - Mosquitto
 - filesystem-backed validated image media storage in the current server implementation
 
-No Kafka, Redis, Kubernetes, or microservices are required for the initial system.
+No Kafka, Redis, Kubernetes, or microservices are required for the initial farm/control system.
 
 ## Planned component extensibility
 
@@ -186,6 +188,45 @@ Important constraints:
 
 MCP authoring is planned **after** those component services exist. The proposed MCP adapter is part of the Go modular monolith and reuses normal validation, farm compare-and-swap, authorization, audit, and command safety.
 
+## Planned commerce and referral monetization
+
+GrowNerve can recommend real hardware and consumables that match a user's technical requirements and, where supported, earn disclosed referral/affiliate commissions.
+
+The technical component registry remains neutral:
+
+```text
+component/domain requirement
+          |
+          v
+compatibility/product mapping
+          |
+          v
+separate commerce service
+      /         |          \
+     v          v           v
+ products     offers     referrals
+```
+
+The planned commerce service owns:
+
+- product/variant catalog
+- component-to-product mappings
+- regional merchant offers
+- merchant API integrations and quotas
+- affiliate credentials/referral configuration
+- merchant-specific link modes
+- disclosures
+- sponsored-placement metadata
+- aggregate click/conversion reporting
+
+The GrowNerve application never constructs affiliate tags itself and community component packs cannot inject tracking/referral URLs.
+
+Organic recommendations are based on technical compatibility and user value. Affiliate payout is not an input to organic ordering. Sponsored products, if added later, appear separately and are clearly labeled.
+
+The commerce service is optional. If it is unavailable or disabled, GrowNerve continues normally with no effect on telemetry, automation, control, alerts, the twin, or local data.
+
+See [Commerce catalog, compatibility, and referral service](docs/27-commerce-catalog-and-referral-service.md).
+
 ## Documentation
 
 The detailed implementation blueprint lives in [`docs/`](docs/README.md).
@@ -209,6 +250,7 @@ Key documents:
 - [Component and plugin system](docs/24-component-plugin-system.md)
 - [MCP component authoring and farm editing](docs/25-mcp-component-authoring.md)
 - [Component taxonomy, capabilities, and information surfaces](docs/26-component-taxonomy-and-capabilities.md)
+- [Commerce catalog, compatibility, and referral service](docs/27-commerce-catalog-and-referral-service.md)
 - [ESP32 reference firmware](firmware/esp32/README.md)
 
 ## Relationship to farmOS
@@ -223,7 +265,7 @@ No farmOS source code is copied into this project.
 
 The executable V0 software baseline is implemented: browser-only IndexedDB/PWA operation, the operational React UI and WebGPU-first digital twin, Go/PostgreSQL/MQTT server mode with authentication and role enforcement, compare-and-swap state concurrency, relational telemetry with bounded history, continuous server-side alert evaluation, server-sent live updates, durable command delivery, validated image media storage, an ESP32 reference firmware target, migrations, containers, CI, and automated unit/integration/E2E coverage.
 
-The generic JSON component registry, third-party component packs, component GLB storage/import, archive v2, ports/anchors, richer taxonomy-driven renderer, and MCP server described in the extensibility documents are **planned and not implemented yet**.
+The generic JSON component registry, third-party component packs, component GLB storage/import, archive v2, ports/anchors, richer taxonomy-driven renderer, MCP server, and commerce/referral service described in the extensibility/monetization documents are **planned and not implemented yet**.
 
 Everything proven only against the simulator says so. Nothing in this repository can energize real equipment by default, and automatic nutrient or pH dosing is not implemented.
 
