@@ -4,7 +4,7 @@ import {
   AlertTriangle, Camera, CircleEllipsis, ClipboardPlus, Droplets, Eye, FlaskConical,
   Gauge, History, Plus, Power, Scissors, Settings, SlidersHorizontal, Wrench,
 } from "lucide-react";
-import { useMemo, useRef, useState, type ComponentType } from "react";
+import { useCallback, useMemo, useRef, useState, type ComponentType } from "react";
 import { WebGLRenderer, type Group, type WebGLRendererParameters } from "three";
 import type { EntityType, FarmData, SceneEntity } from "../domain/model";
 import { actionsForProfile, entityKey } from "./sceneState";
@@ -129,7 +129,7 @@ export function DigitalTwin({ data, selection, onSelect, onAction }: { data: Far
   const latest = useMemo(() => latestMeasurementsByChannel(data), [data]);
   const selectedBinding = selection && data.scene_layouts[0]?.entities.find((entry) => entry.entity_type === selection.type && entry.entity_id === selection.id);
   const selectedTooltip = selectedBinding ? tooltipFor(data, latest, selectedBinding) : undefined;
-  const createRenderer = async (options: WebGLRendererParameters) => {
+  const createRenderer = useCallback(async (options: WebGLRendererParameters) => {
     if (typeof navigator !== "undefined" && "gpu" in navigator) {
       try {
         const { WebGPURenderer } = await import("three/webgpu");
@@ -143,7 +143,7 @@ export function DigitalTwin({ data, selection, onSelect, onAction }: { data: Far
     }
     setRenderer("webgl");
     return new WebGLRenderer({ ...options, antialias: true });
-  };
+  }, []);
   return <div className="gn-twin-wrap">
     <Canvas gl={createRenderer} camera={{ position: data.scene_layouts[0]?.camera_position ?? [7, 6, 8], fov: 42 }} dpr={[1, 1.75]}>
       <Scene data={data} latest={latest} selection={selection} onSelect={onSelect} />
@@ -153,7 +153,7 @@ export function DigitalTwin({ data, selection, onSelect, onAction }: { data: Far
     <div className="gn-scene-help">Drag to orbit · Scroll to zoom · Click an object to inspect</div>
     {selectedBinding && selectedTooltip && <div className="gn-context-panel">
       <div className="gn-context-target"><span>Selected</span><strong>{selectedTooltip.title}</strong><small>{selectedTooltip.detail}</small></div>
-      <div className="gn-radial" aria-label={`${selectedTooltip.title} actions`}>{actionsForProfile(selectedBinding.profile).slice(0, 5).map((action) => { const Icon = actionIcon(action); return <button key={action} title={action} aria-label={action} onClick={() => onAction(action)}><Icon size={15} strokeWidth={1.8} /><span>{action}</span></button>; })}</div>
+      <div className="gn-radial" role="toolbar" aria-label={`${selectedTooltip.title} actions`}>{actionsForProfile(selectedBinding.profile).slice(0, 5).map((action) => { const Icon = actionIcon(action); return <button key={action} title={action} aria-label={action} onClick={() => onAction(action)}><Icon size={15} strokeWidth={1.8} /><span>{action}</span></button>; })}</div>
     </div>}
   </div>;
 }
