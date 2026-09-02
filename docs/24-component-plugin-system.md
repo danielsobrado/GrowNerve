@@ -2,129 +2,137 @@
 
 ## Purpose
 
-GrowNerve's 3D components are data, not hard-coded Three.js classes.
+GrowNerve's digital-twin components are data, not Three.js classes.
 
-The core rule is:
+The long-term rule is:
 
 ```text
-JSON defines components.
-The component registry resolves them.
-Three.js renders them.
-Application services provide state and actions.
-MCP and the normal UI use the same component services.
+component JSON -> validation -> registry -> normalized scene model -> Three.js
+                                      \-> 2D UI / inspectors
+                                      \-> MCP authoring
 ```
 
-This keeps the digital twin extensible without coupling the farm domain to Three.js, individual hardware vendors, or a specific deployment mode.
+Three.js remains a renderer. Domain entities, channels, permissions, commands, and farm state remain authoritative outside the renderer.
 
-The component system must work identically in:
+This document is intentionally grounded in the current codebase. The component system is **not implemented yet**. The existing twin is the migration starting point, not something to replace wholesale.
 
-- full server mode
-- browser-only / GitHub Pages mode
-- simulator and replay mode
-- imported/exported farms
-- future MCP-assisted authoring
+## Current implementation baseline
 
-## Design principles
+Today the frontend already has the right seams:
 
-1. **Domain first.** Three.js is a renderer, not the source of truth.
-2. **Declarative by default.** A component pack contains JSON and assets, not arbitrary executable JavaScript.
-3. **Stable identity.** Component IDs are permanent names; versions change separately.
-4. **Definition and instance are separate.** A component definition describes a kind of object. A component instance describes one placed/configured object.
-5. **Logical signals, not protocols.** Components expose telemetry/control semantics without embedding MQTT, Home Assistant, ESPHome, Modbus, or REST details.
-6. **Capabilities over type checks.** UI and behavior resolve from declared capabilities rather than `if component.type === ...` branches.
-7. **Ports and anchors are first-class.** Connections and physical placement are modeled explicitly.
-8. **Portable assets.** Imported components work offline and in static hosting.
-9. **Validate before install.** Schema, semantic, referential, and asset validation happen before a pack enters the registry.
-10. **One application service boundary.** UI, import/export, backend APIs, and MCP call the same component/farm services.
+- `frontend/src/domain/model.ts` defines `SceneEntity` and `SceneLayout` inside `FarmData`.
+- `SceneEntity` currently contains `entity_type`, `entity_id`, `profile`, `position`, and `scale`.
+- `frontend/src/twin/sceneState.ts` indexes scene nodes by `(entity_type, entity_id)` and maps `profile` to radial actions.
+- `frontend/src/twin/DigitalTwin.tsx` renders procedural geometry with explicit branches for `zone`, `reservoir`, `light`, `fan`, and `plant`.
+- `frontend/src/runtime/pilotData.ts` seeds the reference layout using those profiles.
+- browser mode persists one transactional `FarmData` snapshot through Dexie.
+- server mode persists the same configuration document with compare-and-swap concurrency; PostgreSQL projects only the relational identities it needs for telemetry.
+- `.grownerve.json` is currently archive `schema_version: 1`.
+
+That means the safest migration is additive:
+
+```text
+current SceneEntity + profile
+        |
+        v
+SceneEntity + exact component_ref
+        |
+        v
+registry resolves definition
+        |
+        v
+renderer stops branching on profile
+        |
+        v
+profile becomes migration-only compatibility data
+```
+
+Do not create a second farm model just for plugins.
+
+## Design decisions
+
+1. **Keep operational identity.** A scene object representing a real farm entity continues to use `(entity_type, entity_id)` as its identity. Do not invent a second component-instance ID for the same light, fan, reservoir, plant position, or sensor.
+2. **Definitions are reusable; scene bindings are not.** A component definition describes appearance and generic capabilities. `SceneEntity` binds that definition to one existing domain entity.
+3. **Use exact revisions.** A scene references an exact component `id`, SemVer `version`, and content `digest`.
+4. **Components do not own telemetry.** Existing `Channel` UUIDs remain the telemetry/control identities. Components only declare compatible channel slots and bind those slots to real channels.
+5. **Ports are topology, not telemetry.** Water, air, electrical, and mounting connections are ports/anchors. A telemetry channel is not modeled as a fake physical port.
+6. **Capabilities are descriptive.** They allow GrowNerve to choose supported UI/workflows. They never grant permissions and never bypass safety.
+7. **No executable community plugins in V0.** Component packs are declarative JSON + assets only.
+8. **Keep farm state small.** Large GLBs/textures do not belong inside the whole `FarmData` snapshot or the PostgreSQL farm document.
+9. **One validation contract.** Browser import, server install, tests, and MCP use the same schema fixtures and semantic rules.
+10. **Migrate the current twin incrementally.** The procedural renderer is useful working software and becomes the first set of built-in primitive definitions.
 
 ## Terminology
 
 ### Component definition
 
-Describes a reusable type of object, for example:
+A reusable visual/behavioral description such as:
 
-- generic pH probe
-- 240 W LED panel
-- rectangular reservoir
-- circulation fan
-- lettuce plant
+```text
+generic rectangular reservoir
+240 W LED panel
+circulation fan
+generic pH probe
+lettuce plant
+```
 
-### Component instance
+A component definition does not represent a particular installed device.
 
-A concrete use of a definition in a farm. It owns placement, user configuration, bindings, and runtime state references.
+### Scene binding
+
+The placement of a component definition against an existing GrowNerve domain entity.
+
+For operational components, the binding identity is already:
+
+```text
+(entity_type, entity_id)
+```
+
+This matches `entityKey()` in `frontend/src/twin/sceneState.ts` and preserves shared 2D/3D selection.
 
 ### Component pack
 
-A portable directory or ZIP containing one or more component definitions and their assets.
+A versioned collection of component definitions and local assets.
 
-"Plugin" in this document means a declarative component pack. V0 plugins do **not** execute arbitrary JavaScript.
-
-### Registry
-
-The resolved catalog of available component definitions.
+"Plugin" in this architecture means a declarative component pack. It does not mean arbitrary JavaScript execution.
 
 ### Assembly
 
-A reusable composition of component instances, such as an aeration system or complete DWC module.
+A reusable visual/topology composition such as an aeration kit. Assemblies may contain multiple visual children but do not create a new command or safety boundary.
 
-### Farm layout
+### Component registry
 
-The set of placed component/assembly instances, transforms, connections, bindings, and scene metadata for a farm.
+The resolved catalog of immutable component revisions available to a runtime.
 
-## Architecture
+## Naming and JSON conventions
 
-```text
-                    GrowNerve UI / MCP
-                           |
-                           v
-                 Component/Farm Services
-                           |
-              +------------+------------+
-              |                         |
-              v                         v
-       Component Registry          Farm State
-              |                         |
-              +------------+------------+
-                           |
-                           v
-                 Normalized View Model
-                           |
-              +------------+------------+
-              |                         |
-              v                         v
-        Three.js Renderer          2D Inspectors
+GrowNerve's existing portable/domain JSON uses `snake_case`. New component contracts should follow it instead of introducing a second style.
+
+Use:
+
+```json
+{
+  "schema_version": 1,
+  "component_id": "grownerve.sensor.ph.generic"
+}
 ```
 
-Neither the renderer nor MCP owns component semantics.
+not:
 
-## Repository boundaries
-
-The implementation should converge toward packages/modules with responsibilities similar to:
-
-```text
-component-schema      JSON Schema and version migration
-component-core        normalized component model and invariants
-component-validator   semantic/referential/asset validation
-component-registry    built-in/imported component resolution
-farm-layout           instances, transforms, assemblies, connections
-three-renderer        rendering/picking/visual state adapter
-mcp-server            MCP adapter over application services
+```json
+{
+  "schemaVersion": "1.0",
+  "componentId": "grownerve.sensor.ph.generic"
+}
 ```
 
-Exact source paths may differ from this conceptual split. The dependency direction must remain:
+Schema versions are simple positive integers. Component and pack versions use SemVer separately.
 
-```text
-three-renderer -> component/farm application contracts
-component-core -X-> Three.js
-component-core -X-> MQTT
-component-core -X-> HTTP
-```
+JSON Schemas target JSON Schema 2020-12 and should be closed by default (`additionalProperties: false` or equivalent) for contract objects. External `$ref` resolution is not allowed during untrusted pack validation.
 
-## Component identity and versioning
+## Component identity and immutable revisions
 
-Do not put a mutable display name, filename, or version number into identity semantics.
-
-Examples of stable IDs:
+Stable component IDs use a namespace-like string:
 
 ```text
 grownerve.sensor.ph.generic
@@ -133,167 +141,269 @@ grownerve.actuator.pump.peristaltic
 grownerve.structure.reservoir.rectangular
 grownerve.plant.lettuce.generic
 com.atlas-scientific.sensor.ph-ezo
-org.community.dwc.bucket-20l
+org.example.light.led-panel-240w
 ```
 
-Each definition has a separate semantic version:
+A published revision is identified by:
+
+```text
+component_id + version + digest
+```
+
+Example:
 
 ```json
 {
-  "schemaVersion": "1.0",
-  "id": "grownerve.sensor.ph.generic",
-  "version": "1.0.0"
+  "component_id": "grownerve.sensor.ph.generic",
+  "version": "1.0.0",
+  "digest": "sha256:..."
 }
 ```
 
 Rules:
 
-- `id` is permanent once published.
-- `version` uses SemVer.
-- breaking component-contract changes require a major version.
-- exported farms pin the exact resolved component version for reproducibility.
-- imported packs with the same `id` + `version` but different content hash are rejected as conflicting.
-- schema version and component version are separate concepts.
+- `component_id` is permanent once published.
+- `version` follows SemVer.
+- a published `(component_id, version)` is immutable.
+- the same `(component_id, version)` with a different digest is a conflict and must be rejected.
+- farms pin exact revisions; V0 does not resolve floating ranges such as `^1.0` at load time.
+- upgrades are explicit migrations, never silent latest-version replacement.
 
-## Component definition shape
+The digest covers the normalized component manifest plus declared asset digests. Pack manifests keep a deterministic sorted file list with SHA-256 digests and sizes so integrity can be verified without trusting filenames.
 
-The canonical format is JSON and is validated by a versioned JSON Schema.
+## Target `SceneEntity` evolution
 
-Example:
+The current `SceneEntity` is close to what is needed. Extend it instead of replacing it with a parallel instance graph.
+
+Conceptual target:
+
+```ts
+interface SceneEntity {
+  entity_type: EntityType;
+  entity_id: UUID;
+
+  component_ref: {
+    component_id: string;
+    version: string;
+    digest: string;
+  };
+
+  position: [number, number, number];
+  rotation?: [number, number, number];
+  scale: [number, number, number];
+
+  configuration?: Record<string, unknown>;
+  channel_bindings?: Record<string, UUID>;
+
+  // Temporary compatibility field while v1 layouts migrate.
+  profile?: string;
+}
+```
+
+### Why there is no new operational instance ID
+
+The current code already selects, indexes, alerts, and inspects by domain UUID. Giving the same fan a separate `component_instance_id` would create two identities that have to remain synchronized forever.
+
+Only future scene-only nodes that genuinely have no domain entity may need their own UUID. Do not add that abstraction until a real use case requires it.
+
+## V1 layout migration
+
+Archive/layout migration from the current pilot is deterministic.
+
+Example mapping:
+
+```text
+profile zone       -> grownerve.structure.zone.generic@1.0.0
+profile reservoir  -> grownerve.structure.reservoir.rectangular@1.0.0
+profile light      -> grownerve.light.panel.generic@1.0.0
+profile fan        -> grownerve.air.circulation-fan.generic@1.0.0
+profile plant      -> grownerve.plant.lettuce.generic@1.0.0
+```
+
+The migration adds `component_ref` while preserving the existing `entity_type`, `entity_id`, placement, and scale.
+
+For one compatibility release the renderer may fall back to `profile` when `component_ref` is absent. New writes must use `component_ref` once the migration ships.
+
+## Component definition contract
+
+Keep the first schema small. It should describe only what the current product can consume.
+
+Example pH probe definition:
 
 ```json
 {
-  "schemaVersion": "1.0",
-  "id": "grownerve.sensor.ph.generic",
+  "schema_version": 1,
+  "component_id": "grownerve.sensor.ph.generic",
   "version": "1.0.0",
-  "name": "Generic pH Sensor",
+  "name": "Generic pH Probe",
   "category": "sensor",
   "tags": ["ph", "water", "hydroponics"],
   "model": {
-    "type": "gltf",
-    "src": "./models/ph-sensor.glb",
-    "scale": [1, 1, 1],
-    "rotation": [0, 0, 0]
-  },
-  "dimensions": {
-    "width": 0.025,
-    "height": 0.18,
-    "depth": 0.025,
-    "unit": "m"
-  },
-  "capabilities": ["telemetry", "configurable", "calibration"],
-  "telemetry": [
-    {
-      "id": "ph",
-      "label": "pH",
-      "type": "number",
-      "unit": "pH",
-      "min": 0,
-      "max": 14
+    "type": "primitive",
+    "primitive": "cylinder",
+    "parameters": {
+      "radius_m": 0.0125,
+      "height_m": 0.18
     }
-  ],
-  "ports": [
+  },
+  "capabilities": ["telemetry", "calibration"],
+  "channel_slots": [
     {
-      "id": "probe",
-      "type": "water.probe",
-      "direction": "input"
-    },
-    {
-      "id": "data",
-      "type": "telemetry.ph",
-      "direction": "output"
+      "slot": "ph",
+      "semantic": "water.ph",
+      "kind": "measurement",
+      "value_type": "number",
+      "dimension": "ph",
+      "unit": "pH"
     }
   ],
   "anchors": [
     {
-      "id": "probe-tip",
+      "anchor_id": "probe_tip",
       "type": "water.submersible",
-      "position": [0, -0.09, 0]
+      "position_m": [0, -0.09, 0]
     }
-  ],
-  "ui": {
-    "tooltip": {
-      "fields": ["ph", "status"]
-    },
-    "radialMenu": [
-      {"action": "inspect", "icon": "info"},
-      {"action": "history", "icon": "chart", "requires": "telemetry"},
-      {"action": "calibrate", "icon": "tune", "requires": "calibration"}
-    ]
-  }
+  ]
 }
 ```
 
-The exact schema may evolve before implementation, but the concepts above are contractual.
+The definition does **not** contain:
 
-## Definition versus instance
+- channel UUIDs
+- MQTT topics
+- broker addresses
+- ESPHome entity IDs
+- Modbus registers
+- REST URLs
+- user permissions
+- command authorization rules
 
-A definition describes what a component **is**. An instance describes where a particular component **is used**.
+Those belong to runtime/domain configuration.
 
-Example instance:
+## Channel slots and existing `Channel` integration
 
-```json
-{
-  "id": "ph-sensor-01",
-  "component": {
-    "id": "grownerve.sensor.ph.generic",
-    "version": "1.0.0"
-  },
-  "transform": {
-    "position": [1.24, 0.42, -0.85],
-    "rotation": [0, 1.57, 0],
-    "scale": [1, 1, 1]
-  },
-  "configuration": {
-    "name": "Reservoir pH"
-  },
-  "bindings": {
-    "ph": "channel-uuid-for-reservoir-ph"
-  }
-}
+GrowNerve already has a strong logical channel model with:
+
+```text
+id
+entity_type/entity_id
+key
+kind
+value_type
+unit
+dimension
+minimum/maximum
+safe_minimum/safe_maximum
+stale_after_seconds
 ```
 
-Do not duplicate model metadata or generic capabilities on every instance.
+The component system should reuse it.
 
-## Farm layout JSON
-
-Farm scene/layout data references component definitions instead of embedding Three.js implementation state.
+A definition declares a **slot** describing what kind of channel may be bound. A `SceneEntity.channel_bindings` maps that slot to a real channel UUID.
 
 Example:
 
 ```json
 {
-  "schemaVersion": "1.0",
-  "farmId": "home-dwc",
-  "components": [
-    {
-      "id": "reservoir-01",
-      "component": {
-        "id": "grownerve.structure.reservoir.rectangular",
-        "version": "1.0.0"
-      }
-    },
-    {
-      "id": "ph-01",
-      "component": {
-        "id": "grownerve.sensor.ph.generic",
-        "version": "1.0.0"
-      }
-    }
-  ],
-  "connections": []
+  "channel_bindings": {
+    "ph": "0199..."
+  }
 }
 ```
 
-The farm domain keeps authoritative UUID/entity bindings where required. Scene instance IDs are stable within the farm archive and must not replace domain UUIDs.
+Validation checks the referenced channel exists and is semantically compatible with the slot.
+
+Do not put a fixed channel `key` such as `water.ph` into the definition as the runtime identity. `internal/registry` currently enforces channel-key uniqueness, and the farm owns the actual channel configuration.
+
+## Capabilities and actions
+
+Initial capability vocabulary should stay small and tied to real GrowNerve workflows:
+
+```text
+telemetry
+calibration
+switchable
+variable_output
+growth_stage
+harvestable
+```
+
+The current `profileActions` table in `frontend/src/twin/sceneState.ts` becomes a compatibility adapter.
+
+Target flow:
+
+```text
+component capabilities
+       + domain entity type/state
+       + available bound channels
+       + runtime mode
+       + user role
+       + safety policy
+              |
+              v
+      GrowNerve action resolver
+              |
+              v
+    radial menu / inspector UI
+```
+
+Component JSON does not define privileged UI commands. At most it may contain presentation hints such as tooltip labels or preferred icon names. GrowNerve owns the action catalog and workflow implementation.
+
+This prevents a third-party pack from creating a dangerous action by declaring `"action": "dose_now"`.
+
+## Ports versus anchors
+
+### Ports
+
+Ports represent physical/topological flow or connection interfaces.
+
+Initial examples:
+
+```text
+water.input
+water.output
+air.input
+air.output
+electric.ac_input
+electric.dc_input
+pipe.connection
+```
+
+Example pump ports:
+
+```json
+[
+  {"port_id": "water_in", "type": "water.input", "direction": "input"},
+  {"port_id": "water_out", "type": "water.output", "direction": "output"},
+  {"port_id": "power", "type": "electric.ac_input", "direction": "input"}
+]
+```
+
+Do not add `telemetry.ph`, MQTT, PWM, or relay as topology ports merely because they are data/control concepts. Those are channel bindings or device implementation details.
+
+### Anchors
+
+Anchors are spatial snap/mount points and are intentionally separate from ports.
+
+Examples:
+
+```text
+mount.surface
+mount.tent_pole
+mount.shelf
+water.submersible
+reservoir.rim
+```
+
+An anchor can optionally reference a port when the physical connector and snap point are the same thing.
+
+V0 compatibility uses a small explicit table. Do not build a general ontology engine.
 
 ## Model types
 
-V0 should support three model strategies.
+The current twin already proves procedural geometry is sufficient for a useful operational scene. Preserve that advantage.
 
-### Primitive
-
-For simple objects and AI/MCP-created placeholders that do not need an authored GLB.
+### Primitive — required first
 
 Initial primitive set:
 
@@ -302,608 +412,363 @@ box
 sphere
 cylinder
 plane
-pipe
 ```
 
-Example:
+Add `pipe` only when visible connections are implemented.
 
-```json
-{
-  "model": {
-    "type": "primitive",
-    "primitive": "cylinder",
-    "parameters": {
-      "radius": 0.15,
-      "height": 0.35
-    }
-  }
-}
-```
+Primitive parameters use real-world meters and closed schemas. Arbitrary shader/material code is prohibited.
 
-Primitive parameter schemas are closed and versioned. Do not accept arbitrary shader/code expressions.
+The first built-in definitions should reproduce the exact geometry currently generated by `DigitalTwin.tsx`. That gives a low-risk renderer migration with deterministic visual regression tests.
 
-### glTF / GLB
+### GLB — second
 
-Preferred for authored runtime models.
+Use binary glTF (`.glb`) for authored runtime assets in V0. Supporting both `.gltf` plus arbitrary external sidecar files adds path/reference complexity without current value.
 
 Requirements:
 
-- meters as canonical runtime unit
-- documented forward/up orientation
-- deterministic pivot/origin conventions
-- bounded polygon/texture budgets
-- local pack-relative asset paths
-- optional compression where supported
+- meters as the runtime unit
+- Y-up convention unless the importer normalizes explicitly
+- deterministic origin/pivot convention
+- local pack asset only
+- no remote URI dependencies
+- bounded triangle, texture, node, animation, and file-size budgets
+- parse/inspection failure is a validation failure
 
-### Composite
+Compression may be added when it has a measured benefit and all target runtimes support the required decoder.
 
-A reusable component or assembly made from other registered definitions.
+### Composite / assembly — later
 
-Composite graphs must be acyclic. Validation rejects recursive component references.
+Composition is useful, but do not make it part of the first renderer refactor. The first goal is replacing hard-coded profile branches, not building a CAD graph.
 
-## Capabilities
+## Registry architecture
 
-Capabilities describe generic features the application can act on.
-
-Initial examples:
-
-```text
-telemetry
-configurable
-calibration
-switchable
-variable-output
-power-monitoring
-flow-control
-growth-stage
-biological
-harvestable
-```
-
-The UI resolves actions from capabilities rather than component categories.
-
-Bad:
-
-```ts
-if (component.category === "pump") {
-  showPowerButton();
-}
-```
-
-Preferred conceptual rule:
+The registry exposes immutable definitions from ordered sources:
 
 ```text
-capability: switchable -> offer permitted switch action
-capability: telemetry  -> offer history/current-value UI
-capability: calibration -> offer calibration workflow
+1. built-in revisions shipped with GrowNerve
+2. locally installed revisions
+3. explicitly bundled project revisions
+4. remote catalog metadata (future, never required)
 ```
 
-Capabilities never bypass normal authorization or physical safety checks.
-
-## Telemetry and control semantics
-
-Component definitions declare logical signals only.
-
-They must not embed deployment-specific transport details such as:
+A request is always exact:
 
 ```text
-MQTT broker URL
-MQTT topic
-Home Assistant entity ID
-ESPHome API address
-Modbus register
-REST endpoint
+get(component_id, version, digest)
 ```
 
-Instead:
+There is no last-write-wins behavior.
+
+### Browser storage
+
+Do **not** put imported GLB bytes into the existing Dexie `snapshots` record. `BrowserFarmRepository.update()` currently clones and rewrites the full `FarmData` snapshot; putting large binary assets there would make every farm edit rewrite those assets.
+
+When component packs are implemented, evolve the same IndexedDB database with separate stores such as:
 
 ```text
-component telemetry/control semantic
-              |
-              v
-       component instance binding
-              |
-              v
-     logical DeviceChannel / command
-              |
-              v
- adapter: MQTT / simulator / future integration
+snapshots             existing FarmData snapshot
+component_revisions   manifest/definition JSON keyed by revision identity
+component_assets      Blob keyed by SHA-256 digest
+component_packs       installed-pack metadata
 ```
 
-This allows one component definition to work in server mode, browser simulation, replay, and future adapters.
+This preserves the current repository architecture while isolating large immutable blobs.
 
-## Ports
+### Server storage
 
-Ports represent logical or physical connection interfaces between components.
+The Go server currently stores the farm configuration as an opaque versioned JSON document and relationally projects facilities/devices/channels. Unknown farm-document fields are preserved; only measurements receive special relational handling.
 
-Examples:
+Therefore scene bindings can evolve without redesigning PostgreSQL.
 
-```text
-electric.ac
-electric.dc
-water.input
-water.output
-air.input
-air.output
-nutrient.output
-sensor.probe
-telemetry.ph
-telemetry.ec
-control.pwm
-control.relay
-network.logical
-```
+Installed component packs, however, should not live inside that whole farm document because they are global/reusable and may contain large assets. Add a small component-registry storage boundary when implementation begins. Reuse existing platform storage conventions, but do not route GLBs through `internal/media` while that service intentionally accepts images only.
 
-A pump may declare:
+## Farm archive compatibility
+
+Current `.grownerve.json` archives are `schema_version: 1`. Component support changes the portable contract materially, so the archive must move to **schema version 2** rather than silently changing v1 semantics.
+
+Version 2 should add a top-level dependency lock such as:
 
 ```json
 {
-  "ports": [
-    {"id": "water-in", "type": "water.input", "direction": "input"},
-    {"id": "water-out", "type": "water.output", "direction": "output"},
-    {"id": "power", "type": "electric.ac", "direction": "input"}
+  "component_lock": [
+    {
+      "component_id": "grownerve.light.panel.generic",
+      "version": "1.0.0",
+      "digest": "sha256:...",
+      "source": "builtin"
+    }
   ]
 }
 ```
 
-Connection validation checks compatibility before the layout is saved.
-
-V0 compatibility can use an explicit table maintained by GrowNerve. Do not invent a general ontology engine.
-
-## Anchors
-
-Anchors represent spatial attachment/snap points. They are separate from ports because not every physical mount is a flow/data connection and not every logical port has a visible attachment point.
-
-Examples:
+Migration rules:
 
 ```text
-mount.surface
-mount.tent-pole
-mount.shelf
-water.submersible
-pipe.connection
-reservoir.rim
+v1 archive
+  -> validate using existing v1 validator
+  -> migrate profile-based scene entries to built-in component_ref values
+  -> produce normalized v2 FarmData/archive
 ```
 
-Anchor definitions use local model coordinates.
+Never mutate a v1 import partially before the complete v2 migration validates.
 
-Later scene editing can snap compatible anchors while still storing explicit transforms in farm layout JSON.
+### Normal JSON export
 
-## Declarative UI metadata
+`.grownerve.json` remains the normal human-inspectable farm archive. It carries exact component dependency metadata but not large GLB bytes.
 
-Component packs may request standard GrowNerve actions. They do not provide arbitrary UI code.
+### Bundled export
 
-Example:
-
-```json
-{
-  "ui": {
-    "radialMenu": [
-      {"action": "inspect", "icon": "info"},
-      {"action": "toggle", "icon": "power", "requires": "switchable"},
-      {"action": "history", "icon": "chart", "requires": "telemetry"}
-    ]
-  }
-}
-```
-
-GrowNerve owns the implementation of standard actions and filters them by:
-
-- declared capability
-- current component/domain state
-- user permissions
-- runtime mode
-- safety policy
-
-A component pack cannot introduce a privileged command merely by naming it in JSON.
-
-## State binding
-
-Definitions may describe how normalized component state maps to visuals and UI, but must not reference raw API payload structures.
-
-Conceptually:
+When a farm depends on local/community packs, optionally create a ZIP containing:
 
 ```text
-DeviceState / ChannelState / PlantState
-                |
-                v
-       normalized component state
-                |
-        +-------+-------+
-        |               |
-        v               v
-     Three.js          HTML UI
+project.grownerve.json
+components/<pack-id>/<version>/pack.json
+components/<pack-id>/<version>/components/...
+components/<pack-id>/<version>/assets/...
 ```
 
-Examples of normalized state:
-
-```text
-power: on/off/pending/offline
-output: 0..1
-value + unit + freshness + quality
-fillRatio: 0..1
-alertSeverity
-plantGrowthStage
-```
-
-## Plants
-
-Plants use the same component framework but may declare biological/growth capabilities.
-
-A plant definition may reference discrete visual stages:
-
-```json
-{
-  "capabilities": ["growth-stage", "biological", "harvestable"],
-  "visualStates": {
-    "seedling": {"model": "./models/lettuce-seedling.glb"},
-    "vegetative": {"model": "./models/lettuce-vegetative.glb"},
-    "mature": {"model": "./models/lettuce-mature.glb"}
-  }
-}
-```
-
-Displayed growth is an operational representation, not a claim of exact biological simulation.
+The JSON project remains valid and inspectable without the ZIP container. Missing dependencies surface explicitly instead of being silently substituted.
 
 ## Component pack format
 
-A pack is a directory during development and a ZIP for import/export.
-
-Example:
+Development layout:
 
 ```text
 hydroponics-pack/
-  plugin.json
+  pack.json
   components/
-    ph-sensor/
-      component.json
-      models/
-        sensor.glb
-      textures/
-      thumbnail.webp
-    ec-sensor/
-      component.json
-      models/
-        sensor.glb
-  locales/
-    en.json
-  README.md
+    ph-probe.json
+    ec-probe.json
+  assets/
+    ph-probe.glb
+    ph-probe.webp
   LICENSE
+  README.md
 ```
 
-Pack manifest example:
+Example manifest:
 
 ```json
 {
-  "schemaVersion": "1.0",
-  "id": "org.example.hydroponics-pack",
-  "name": "Example Hydroponics Pack",
-  "version": "1.2.0",
+  "schema_version": 1,
+  "pack_id": "org.example.hydroponics",
+  "version": "1.0.0",
+  "name": "Example Hydroponics Components",
   "components": [
-    "./components/ph-sensor/component.json",
-    "./components/ec-sensor/component.json"
+    "components/ph-probe.json",
+    "components/ec-probe.json"
+  ],
+  "files": [
+    {
+      "path": "components/ph-probe.json",
+      "sha256": "...",
+      "size": 1234
+    }
   ]
 }
 ```
 
-V0 uses ZIP because it is universally supported. A custom file extension can be added later only if it improves UX without changing the internal format.
+V0 import uses ZIP only as a container. Do not introduce a custom binary format.
 
-## Component registry
+## Validation pipeline
 
-The registry exposes one normalized read interface over multiple sources:
-
-```text
-built-in
-imported/local
-farm-embedded dependencies
-remote registry (later)
-```
-
-Conceptual operations:
+Keep structure validation and domain validation separate.
 
 ```text
-get(id, version)
-list()
-search(category/tags/capability)
-install(pack)
-uninstall(pack)
-validate(pack)
-resolveFarmDependencies(farm)
+archive limits
+ -> ZIP/path validation
+ -> JSON parse
+ -> JSON Schema 2020-12
+ -> manifest/file-digest validation
+ -> component semantic validation
+ -> component-reference validation
+ -> model inspection
+ -> farm binding validation
+ -> install/commit
 ```
 
-Resolution rules must be deterministic. A farm export records exact component versions and content hashes needed to reproduce the layout.
+Semantic checks include:
 
-A future remote marketplace must be optional. GrowNerve must remain usable with only local packs.
+- finite positive dimensions
+- finite transforms
+- unique slot/port/anchor IDs within a definition
+- known capability vocabulary
+- compatible channel bindings
+- exact component revision available
+- no recursive composite graph when composites arrive
+- pack-relative paths only
+- declared files exist and match digest/size
 
-## JSON Schema and validation
+### Archive hardening
 
-Maintain separate schemas rather than one unbounded document:
+Reject at minimum:
+
+- absolute paths
+- `..` traversal after normalization
+- symlink/hardlink entries
+- encrypted archives
+- excessive entry count
+- excessive compressed or expanded size
+- duplicate normalized paths
+- remote model/texture URLs
+- executable code formats
+
+Limits belong in configuration, not scattered constants.
+
+## Security boundary
+
+Allowed V0 pack content:
 
 ```text
-schemas/component.schema.json
-schemas/plugin.schema.json
-schemas/farm-layout.schema.json
-schemas/connection.schema.json
-schemas/assembly.schema.json
+JSON
+GLB
+approved raster image formats
+plain/localization text
+Markdown documentation treated as untrusted content
 ```
 
-Validation pipeline:
+Not allowed:
 
 ```text
-parse
- -> JSON Schema validation
- -> semantic validation
- -> reference validation
- -> asset validation
- -> compatibility validation
- -> install/register
+JavaScript
+WebAssembly
+custom shader source
+shell commands
+native libraries
+network callbacks
+remote asset hot-links
 ```
 
-Semantic validation includes checks JSON Schema cannot express cleanly, for example:
+Component metadata is never an authorization source.
 
-- minimum is not greater than maximum
-- composite graph is acyclic
-- referenced component versions exist
-- port IDs are unique within a component
-- model paths stay inside the pack
-- dimensions are finite and positive where required
-- transforms contain finite numbers
-- duplicate stable IDs are handled according to version/conflict rules
+## Implementation sequence from the current code
 
-## Schema migration
+### C0 — Freeze the current compatibility fixture
 
-Every persisted format includes `schemaVersion`.
+Before refactoring, add/keep deterministic tests for the existing pilot scene:
 
-Older supported documents are migrated into the current normalized model before use:
+- scene entity identity
+- current layout transforms
+- profile action resolution
+- selection behavior
+- WebGPU/WebGL fallback behavior
 
-```text
-stored/imported v1
-      |
-      v
-migration chain
-      |
-      v
-current normalized model
-```
+The current procedural pilot is the migration fixture.
 
-Renderers and application services should consume the normalized model, not carry branches for every historic schema.
-
-## Browser-only mode
-
-The component architecture is required to work without a server.
-
-Browser mode stores:
-
-- installed component definitions
-- imported assets
-- farm layout instances
-- dependency/version metadata
-
-in IndexedDB/application storage.
-
-A `.grownerve.json` farm export should contain farm/domain data plus component dependency metadata. When portability requires bundled binary assets, GrowNerve may additionally export a ZIP archive that contains the JSON archive and referenced component packs/assets.
-
-Do not force all GLBs into base64 inside the normal JSON format; large binary assets should remain separate archive entries when a bundled export is used.
-
-## Security model
-
-V0 imported packs are declarative.
-
-Allowed content is limited to validated formats such as:
-
-- JSON
-- GLB/glTF according to policy
-- supported image texture/thumbnail formats
-- localization text
-- Markdown documentation displayed as untrusted/plain content unless sanitized
-
-V0 packs do **not** execute arbitrary JavaScript, WebAssembly, shaders, shell commands, or network calls.
-
-Import protections include:
-
-- ZIP path traversal prevention
-- compressed/uncompressed size limits
-- file count limits
-- MIME/content validation
-- asset path containment
-- duplicate/conflicting ID detection
-- finite geometry/metadata limits where practical
-- remote URL rejection by default
-
-Remote model/texture URLs are rejected by default because they break offline operation, reproducibility, privacy, and content validation.
-
-## Assemblies
-
-Assemblies allow reusable systems without turning every composition into a new opaque GLB.
-
-Examples:
-
-```text
-Component: air pump
-Component: air stone
-Component: tube
-Assembly: aeration system
-
-Assembly: aeration system
-Component: reservoir
-Component: net pots
-Assembly: DWC module
-```
-
-Assemblies store child component references, relative transforms, and internal connections. They can be instantiated more than once.
-
-An assembly is not a new runtime safety boundary. Commands still resolve to the underlying domain/device entities.
-
-## Initial built-in component library
-
-Keep V0 intentionally small.
-
-### Structures
-
-- grow tent
-- rack/shelf
-
-### Reservoir/water
-
-- rectangular reservoir
-- bucket
-- tube/pipe primitive
-- water pump
-- air pump
-- air stone
-
-### Lighting/air
-
-- LED panel
-- circulation fan
-
-### Sensors
-
-- air temperature
-- relative humidity
-- water temperature
-- pH
-- EC
-- water level
-- leak
-
-### Controls
-
-- smart plug
-- relay
-- PWM controller
-
-### Plants
-
-- lettuce
-- tomato
-- generic plant
-
-The reference 3 x 3 DWC installation remains the acceptance scene.
-
-## Implementation sequence
-
-### C1 — Component specification
+### C1 — Schemas and built-in registry
 
 Deliver:
 
-- component/plugin/farm-layout JSON Schemas
-- stable ID/version rules
-- ports, anchors, capabilities, telemetry semantics
-- primitive model schemas
-- sample component packs
+- `component.schema.json`
+- `pack.schema.json`
+- component-ref schema
+- channel-slot schema
+- primitive model schema
+- exact revision/digest rules
+- built-in definitions matching current profiles
 
 Exit criteria:
 
-- valid/invalid fixtures cover every schema family
-- the reference installation can be represented without Three.js-specific JSON
+- every current pilot `profile` maps to one built-in component revision
+- valid/invalid fixtures exercise all schema families
 
-### C2 — Component runtime
+### C2 — Additive `SceneEntity` migration
 
 Deliver:
 
-- normalized component model
-- validator
-- migrations
-- registry
-- deterministic dependency resolution
+- `component_ref`
+- optional `rotation`
+- optional configuration/channel bindings
+- deterministic v1 profile -> component-ref migration
+- compatibility fallback for old scene data
 
 Exit criteria:
 
-- built-in and imported definitions resolve identically
-- conflicts are explicit rather than last-write-wins
+- current v1 pilot data opens unchanged
+- migrated data preserves the same `(entity_type, entity_id)` selection keys
 
-### C3 — Generic Three.js renderer integration
+### C3 — Generic primitive renderer
 
-Deliver:
-
-- definition-to-render-model adapter
-- primitive rendering
-- GLB loading/cache
-- generic selection/tooltip/radial action metadata
+Refactor `DigitalTwin.tsx` so primitive/model rendering is selected by resolved component definition rather than `binding.profile` branches.
 
 Exit criteria:
 
-- renderer has no component-specific hydroponics branches for the pilot scene
+- pilot visuals and interactions remain equivalent
+- no hydroponic component type requires a renderer `if profile === ...` branch
 
-### C4 — Farm layout and assemblies
+Equipment-specific dynamic state such as fan rotation and reservoir fill remains implemented by normalized render-state behaviors owned by GrowNerve, not arbitrary plugin code.
 
-Deliver:
+### C4 — Capability/action resolver
 
-- component instances
-- transforms
-- assemblies
-- import/export
-- deterministic layout loading
+Replace `profileActions` with domain/capability-based action resolution while preserving authorization and command safety.
 
-### C5 — Ports, anchors, and connections
+### C5 — Browser/server registry persistence
 
-Deliver:
+Add separate immutable definition/asset storage without bloating `FarmData` snapshots.
 
-- compatible connection validation
-- visible connection representation where useful
-- snap metadata foundation
+### C6 — Archive v2 and bundled export
 
-Do not turn this phase into a full CAD editor.
+Implement v1 -> v2 migration, dependency lock, missing-dependency UX, and optional bundled pack export.
 
-### C6 — Pack management
+### C7 — GLB loading and validation
 
-Deliver:
+Only after primitives are stable.
 
-- ZIP import/export
-- install/uninstall/enable/disable semantics as needed
-- browser IndexedDB storage
-- asset validation
+### C8 — Ports/anchors/connections
 
-### C7 — MCP adapter
+Add physical topology and placement metadata only when layout editing needs it.
 
-Expose component/farm services through MCP as defined in `25-mcp-component-authoring.md`.
+### C9 — MCP adapter
 
-### C8 — Community distribution
+Expose the same component/layout services using `25-mcp-component-authoring.md`.
 
-Later only:
+## Testing requirements
 
-- optional remote catalog
-- signing/trust metadata
-- publisher tooling
-- version discovery/update UX
-
-## Testing
-
-Unit/contract coverage must include:
+Unit/contract coverage:
 
 - schema validation
-- semantic validation
-- migration fixtures
-- stable ID/version resolution
-- conflicting pack rejection
-- port compatibility
-- anchor transform parsing
-- composite cycle detection
-- farm dependency resolution
-- browser/server parity where the same operation exists
+- v1 -> v2 migration fixtures
+- exact revision/digest conflict rules
+- channel-slot compatibility with the existing `Channel` model
+- registry resolution order
+- archive path/size/file-digest validation
+- profile compatibility mapping
+- action-resolution capability rules
 
-Browser/E2E coverage must include:
+Browser tests:
 
-- import valid pack
-- reject invalid/malicious archive paths
-- render imported primitive and GLB component
-- save/reload layout
-- export/import layout preserving component identity and transforms
-- missing dependency UX
-- selecting imported component resolves the correct domain binding
+- old pilot archive still opens
+- migrated pilot selects the same entities
+- imported primitive definition renders
+- local component registry survives reload
+- component assets are not rewritten with every farm snapshot update
+- missing dependency is explicit
+- bundled export/import preserves exact digests
 
-## Non-goals for V0
+Server tests:
 
-Do not add these merely to make the plugin system appear general:
+- component-ref fields survive whole-document save/load
+- farm CAS conflicts still protect layout edits
+- component pack storage is independent from farm-document CAS
+- unauthorized component/layout mutations fail before persistence
 
-- arbitrary JavaScript plugin execution
-- arbitrary WebAssembly execution
-- user-defined shaders
-- a Blender-like/CAD editor
-- a required public marketplace
+Visual regression:
+
+Use the existing deterministic pilot camera/layout before and after the renderer refactor. Pixel-perfect equality is not required across WebGPU/WebGL, but object placement, identity, and semantic state must remain stable.
+
+## Non-goals for the first implementation
+
+Do not add these to make the system appear more general:
+
+- arbitrary executable plugins
+- arbitrary shaders
+- a public marketplace requirement
+- automatic component upgrades
+- SemVer range resolution at farm load
+- a second identity for every operational scene object
+- a second telemetry model parallel to `Channel`
+- a CAD/Blender-like editor
+- a generic semantic ontology engine
 - remote asset hot-linking
-- a general semantic ontology engine
-- arbitrary protocol logic inside components
 
-The smallest useful component contract for the real pilot is the priority.
+The first success criterion is simpler: the current pilot scene renders from validated component definitions with the same domain identities and without hard-coded component profile branches.
