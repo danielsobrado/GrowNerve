@@ -2,6 +2,8 @@ package farm
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -190,18 +192,51 @@ type commandOutcome struct {
 	safety   *commanddomain.SafetyError
 }
 
+func isJSONContentType(value string) bool {
+	return strings.EqualFold(strings.TrimSpace(strings.Split(value, ";")[0]), "application/json")
+}
+
+func commandIntentFingerprint(intent commandIntent) string {
+	encoded, _ := json.Marshal(intent)
+	digest := sha256.Sum256(encoded)
+	return hex.EncodeToString(digest[:])
+}
+
+func writeCommandDecodeProblem(writer http.ResponseWriter, request *http.Request, err error) {
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		writeProblem(writer, request, http.StatusRequestEntityTooLarge, "COMMAND_TOO_LARGE", "Command request exceeds the configured request limit")
+		return
+	}
+	writeProblem(writer, request, http.StatusBadRequest, "INVALID_COMMAND", "Command request must contain one valid JSON object")
+}
+
 func (handler *Handler) createCommand(writer http.ResponseWriter, request *http.Request) {
 	if !handler.permit(writer, request, ActionIssueCommand) {
 		return
 	}
-	if request.Header.Get("Content-Type") != "application/json" {
+	if !isJSONContentType(request.Header.Get("Content-Type")) {
 		writeProblem(writer, request, http.StatusUnsupportedMediaType, "CONTENT_TYPE_REQUIRED", "Content-Type must be application/json")
 		return
 	}
 	var intent commandIntent
 	decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 64<<10))
 	decoder.DisallowUnknownFields()
-	if decoder.Decode(&intent) != nil || intent.TargetChannelID == "" || strings.TrimSpace(intent.Reason) == "" {
+	if err := decoder.Decode(&intent); err != nil {
+		writeCommandDecodeProblem(writer, request, err)
+		return
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		if err == nil {
+			err = errors.New("multiple JSON values")
+		}
+		writeCommandDecodeProblem(writer, request, err)
+		return
+	}
+	intent.TargetChannelID = strings.TrimSpace(intent.TargetChannelID)
+	intent.Reason = strings.TrimSpace(intent.Reason)
+	if intent.TargetChannelID == "" || len(intent.Value) == 0 || intent.Reason == "" {
 		writeProblem(writer, request, http.StatusBadRequest, "INVALID_COMMAND", "targetChannelId, value, and reason are required")
 		return
 	}
@@ -268,13 +303,19 @@ func (handler *Handler) decideCommand(rawState json.RawMessage, intent commandIn
 		*problem = &problemDetails{http.StatusInternalServerError, "STATE_INVALID", "Stored farm state is invalid"}
 		return nil, false
 	}
+	fingerprint := commandIntentFingerprint(intent)
 	if idempotencyKey != "" {
 		for _, existing := range state.Commands {
 			var record map[string]any
-			if json.Unmarshal(existing, &record) == nil && record["idempotency_key"] == idempotencyKey {
-				outcome.replayed, outcome.encoded = true, existing
+			if json.Unmarshal(existing, &record) != nil || record["idempotency_key"] != idempotencyKey {
+				continue
+			}
+			if record["request_fingerprint"] != fingerprint {
+				*problem = &problemDetails{http.StatusConflict, "IDEMPOTENCY_KEY_REUSED", "Idempotency-Key was already used for a different command request"}
 				return nil, false
 			}
+			outcome.replayed, outcome.encoded = true, existing
+			return nil, false
 		}
 	}
 	var channel *channelState
@@ -334,7 +375,7 @@ func (handler *Handler) decideCommand(rawState json.RawMessage, intent commandIn
 		"id": uuid.NewString(), "target_channel_id": intent.TargetChannelID, "command_type": "set_percent",
 		"value": json.RawMessage(intent.Value), "reason": intent.Reason, "status": status,
 		"requested_at": now, "updated_at": now, "expires_at": expiresAt, "simulated": false,
-		"idempotency_key": idempotencyKey,
+		"idempotency_key": idempotencyKey, "request_fingerprint": fingerprint,
 	}
 	if channel.ValueType == "boolean" {
 		record["command_type"] = "set_boolean"
@@ -460,7 +501,7 @@ func (handler *Handler) putState(writer http.ResponseWriter, request *http.Reque
 	if !handler.permit(writer, request, ActionWriteState) {
 		return
 	}
-	if mediaType := strings.ToLower(strings.TrimSpace(strings.Split(request.Header.Get("Content-Type"), ";")[0])); mediaType != "application/json" {
+	if !isJSONContentType(request.Header.Get("Content-Type")) {
 		writeProblem(writer, request, http.StatusUnsupportedMediaType, "CONTENT_TYPE_REQUIRED", "Content-Type must be application/json")
 		return
 	}
