@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -138,7 +139,7 @@ func TestIdempotencyKeyCannotBeReusedForDifferentCommand(t *testing.T) {
 	handler := NewHandler(store)
 
 	send := func(value int) *httptest.ResponseRecorder {
-		body := `{"targetChannelId":"01990a20-6a00-7000-8000-000000000001","value":` + json.Number(string(rune('0'+value))).String() + `,"reason":"test"}`
+		body := `{"targetChannelId":"01990a20-6a00-7000-8000-000000000001","value":` + strconv.Itoa(value) + `,"reason":"test"}`
 		request := httptest.NewRequest(http.MethodPost, "/api/v1/commands", strings.NewReader(body))
 		request.Header.Set("Content-Type", "application/json")
 		request.Header.Set("Idempotency-Key", "stable-key")
