@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	commanddomain "github.com/jdanielsobrado/grownerve/internal/command"
 	"github.com/jdanielsobrado/grownerve/internal/deviceprotocol"
 )
 
@@ -180,6 +181,26 @@ func TestCommandBodyLimitReturns413(t *testing.T) {
 	response := makeRequest(handler, http.MethodPost, "/api/v1/commands", body, "application/json")
 	if response.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("oversized command = %d: %s", response.Code, response.Body.String())
+	}
+}
+
+func TestCommandRejectsExcessiveTTLAndUnsupportedValueType(t *testing.T) {
+	now := time.Date(2026, 9, 2, 0, 0, 0, 0, time.UTC)
+	store := NewMemoryStore()
+	_, _ = store.Save(context.Background(), json.RawMessage(commandStateJSON(true, 0, 100)), AnyVersion)
+	handler := NewHandler(store, WithClock(func() time.Time { return now }))
+	future := now.Add(commanddomain.MaximumTTL + time.Second).Format(time.RFC3339Nano)
+	body := `{"targetChannelId":"01990a20-6a00-7000-8000-000000000001","value":50,"reason":"test","expiresAt":"` + future + `"}`
+	response := makeRequest(handler, http.MethodPost, "/api/v1/commands", body, "application/json")
+	if response.Code != http.StatusUnprocessableEntity || !strings.Contains(response.Body.String(), "COMMAND_TTL_TOO_LONG") {
+		t.Fatalf("excessive TTL = %d: %s", response.Code, response.Body.String())
+	}
+
+	state := strings.Replace(commandStateJSON(true, 0, 100), `"value_type":"number"`, `"value_type":"enum"`, 1)
+	_, _ = store.Save(context.Background(), json.RawMessage(state), AnyVersion)
+	response = makeRequest(NewHandler(store), http.MethodPost, "/api/v1/commands", `{"targetChannelId":"01990a20-6a00-7000-8000-000000000001","value":50,"reason":"test"}`, "application/json")
+	if response.Code != http.StatusUnprocessableEntity || !strings.Contains(response.Body.String(), "UNSUPPORTED_COMMAND_CHANNEL") {
+		t.Fatalf("unsupported value type = %d: %s", response.Code, response.Body.String())
 	}
 }
 
