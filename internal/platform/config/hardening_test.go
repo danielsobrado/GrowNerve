@@ -18,7 +18,7 @@ func writeMinimalConfig(t *testing.T) string {
 }
 
 func TestLoadRejectsMalformedEnvironmentOverrides(t *testing.T) {
-	for name, variable, value := range map[string]struct {
+	for name, testCase := range map[string]struct {
 		variable string
 		value    string
 	}{
@@ -27,7 +27,7 @@ func TestLoadRejectsMalformedEnvironmentOverrides(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			directory := writeMinimalConfig(t)
-			t.Setenv(variable, value)
+			t.Setenv(testCase.variable, testCase.value)
 			if _, err := Load(directory); err == nil {
 				t.Fatal("malformed environment override was silently ignored")
 			}
