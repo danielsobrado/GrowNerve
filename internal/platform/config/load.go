@@ -94,6 +94,12 @@ func applyDefaults(config *Config) {
 	if config.Server.ShutdownTimeout == 0 {
 		config.Server.ShutdownTimeout = 10 * time.Second
 	}
+	if config.Telemetry.BatchSize == 0 {
+		config.Telemetry.BatchSize = 200
+	}
+	if config.Telemetry.FlushInterval == 0 {
+		config.Telemetry.FlushInterval = time.Second
+	}
 	if config.Media.MaximumBytes == 0 {
 		config.Media.MaximumBytes = 16 << 20
 	}
@@ -120,9 +126,9 @@ const (
 	ModeOIDC  = "oidc"
 )
 
-func positiveDuration(name string, value time.Duration) error {
-	if value <= 0 {
-		return fmt.Errorf("%s must be above zero", name)
+func rejectNegativeDuration(name string, value time.Duration) error {
+	if value < 0 {
+		return fmt.Errorf("%s cannot be negative", name)
 	}
 	return nil
 }
@@ -145,7 +151,7 @@ func (config Config) Validate() error {
 	if strings.TrimSpace(config.Server.Address) == "" {
 		return errors.New("server.address is required")
 	}
-	if err := positiveDuration("server.shutdown_timeout", config.Server.ShutdownTimeout); err != nil {
+	if err := rejectNegativeDuration("server.shutdown_timeout", config.Server.ShutdownTimeout); err != nil {
 		return err
 	}
 	if strings.TrimSpace(config.Postgres.URLEnv) == "" {
@@ -186,10 +192,10 @@ func (config Config) Validate() error {
 			return errors.New("auth.oidc requires both an issuer and an audience")
 		}
 	}
-	if config.Telemetry.BatchSize <= 0 {
-		return errors.New("telemetry.batch_size must be above zero")
+	if config.Telemetry.BatchSize < 0 {
+		return errors.New("telemetry.batch_size cannot be negative")
 	}
-	if err := positiveDuration("telemetry.flush_interval", config.Telemetry.FlushInterval); err != nil {
+	if err := rejectNegativeDuration("telemetry.flush_interval", config.Telemetry.FlushInterval); err != nil {
 		return err
 	}
 	if config.Telemetry.Retention < 0 {
@@ -202,12 +208,12 @@ func (config Config) Validate() error {
 		"runtime.config_sync_interval":   config.Runtime.ConfigSyncInterval,
 		"runtime.device_offline_after":   config.Runtime.DeviceOfflineAfter,
 	} {
-		if err := positiveDuration(name, value); err != nil {
+		if err := rejectNegativeDuration(name, value); err != nil {
 			return err
 		}
 	}
-	if config.Media.MaximumBytes <= 0 {
-		return errors.New("media.maximum_bytes must be above zero")
+	if config.Media.MaximumBytes < 0 {
+		return errors.New("media.maximum_bytes cannot be negative")
 	}
 	return config.validateProduction()
 }
@@ -224,9 +230,8 @@ func (config Config) validateProduction() error {
 			return errors.New("production cannot use wildcard CORS")
 		}
 	}
-	if config.Server.RateLimit.ReadPerSecond <= 0 || config.Server.RateLimit.ReadBurst <= 0 ||
-		config.Server.RateLimit.WritePerSecond <= 0 || config.Server.RateLimit.WriteBurst <= 0 {
-		return errors.New("production requires positive read and write rate limits and bursts")
+	if config.Server.RateLimit.WritePerSecond <= 0 {
+		return errors.New("production requires server.rate_limit.write_per_second above zero")
 	}
 	if strings.TrimSpace(config.MQTT.UsernameEnv) == "" || strings.TrimSpace(config.MQTT.PasswordEnv) == "" {
 		return errors.New("production requires mqtt.username_env and mqtt.password_env; anonymous broker access is not permitted")
