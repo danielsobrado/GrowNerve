@@ -4,8 +4,17 @@
 
 namespace {
 constexpr const char *kNamespace = "grownerve";
-constexpr const char *kVersionKey = "cfgver";
-constexpr const char *kSettingsKey = "cfgblob";
+constexpr const char *kRecordKey = "cfgrecord";
+constexpr uint32_t kStorageMagic = 0x474E4346;  // GNCF
+constexpr uint16_t kStorageVersion = 1;
+constexpr size_t kMaximumConfigVersionLength = 64;
+
+struct PersistedEdgeConfig {
+  uint32_t magic = kStorageMagic;
+  uint16_t storageVersion = kStorageVersion;
+  EdgeSettings settings;
+  char configVersion[kMaximumConfigVersionLength + 1] = {0};
+};
 
 bool validScheduleWindow(int onHour, int onMinute, int offHour, int offMinute) {
   if (onHour < 0 || onHour > 23 || offHour < 0 || offHour > 23 ||
@@ -138,8 +147,8 @@ bool parseEdgeSettings(const JsonObjectConst &config, EdgeSettings &out, String 
         error = "safeOutputs contains an unknown channel";
         return false;
       }
-      if (value < 0 || value > 100) {
-        error = "safeOutputs values must be between 0 and 100";
+      if (!isfinite(value) || value < 0 || value > 100) {
+        error = "safeOutputs values must be finite and between 0 and 100";
         return false;
       }
       if (strcmp(channelId, CHANNEL_LIGHT) == 0) parsed.safeLight = value;
@@ -152,22 +161,37 @@ bool parseEdgeSettings(const JsonObjectConst &config, EdgeSettings &out, String 
   return true;
 }
 
-void saveEdgeSettings(Preferences &storage, const EdgeSettings &settings, const String &version) {
-  storage.begin(kNamespace, false);
-  storage.putBytes(kSettingsKey, &settings, sizeof(settings));
-  storage.putString(kVersionKey, version);
+bool saveEdgeSettings(Preferences &storage, const EdgeSettings &settings, const String &version) {
+  if (version.length() == 0 || version.length() > kMaximumConfigVersionLength) return false;
+
+  PersistedEdgeConfig record{};
+  record.settings = settings;
+  version.toCharArray(record.configVersion, sizeof(record.configVersion));
+
+  if (!storage.begin(kNamespace, false)) return false;
+  const size_t written = storage.putBytes(kRecordKey, &record, sizeof(record));
   storage.end();
+  return written == sizeof(record);
 }
 
 bool loadEdgeSettings(Preferences &storage, EdgeSettings &settings, String &version) {
-  storage.begin(kNamespace, true);
-  const size_t stored = storage.getBytesLength(kSettingsKey);
-  bool restored = false;
-  if (stored == sizeof(settings)) {
-    storage.getBytes(kSettingsKey, &settings, sizeof(settings));
-    version = storage.getString(kVersionKey, "");
-    restored = version.length() > 0;
+  if (!storage.begin(kNamespace, true)) return false;
+  const size_t stored = storage.getBytesLength(kRecordKey);
+  if (stored != sizeof(PersistedEdgeConfig)) {
+    storage.end();
+    return false;
   }
+
+  PersistedEdgeConfig record{};
+  const size_t read = storage.getBytes(kRecordKey, &record, sizeof(record));
   storage.end();
-  return restored;
+  if (read != sizeof(record) || record.magic != kStorageMagic || record.storageVersion != kStorageVersion) {
+    return false;
+  }
+  record.configVersion[kMaximumConfigVersionLength] = '\0';
+  if (record.configVersion[0] == '\0') return false;
+
+  settings = record.settings;
+  version = record.configVersion;
+  return true;
 }
