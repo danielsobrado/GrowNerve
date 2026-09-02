@@ -3,6 +3,7 @@ env: development
 server:
   address: 127.0.0.1:8080
   shutdown_timeout: 10s
+  max_header_bytes: 32768
   cors_allowed_origins:
     - http://127.0.0.1:5173
     - http://localhost:5173
