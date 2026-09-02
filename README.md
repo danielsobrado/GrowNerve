@@ -90,6 +90,7 @@ The first version must remain useful without automatic nutrient dosing. Chemistr
 - **Domain-bound twin:** operational scene identity is the existing `(entity_type, entity_id)` identity used by the rest of the product.
 - **Extensible twin target:** reusable visual definitions are moving toward renderer-agnostic JSON plus validated local assets. The current implemented pilot twin is still procedural/profile-driven; see the status document.
 - **Declarative plugins:** planned V0 component packs contain validated definitions/assets and do not execute arbitrary plugin code.
+- **Taxonomy over hard-coded types:** category is for discovery, subtype describes the specific family, and product-controlled capabilities plus real domain/channel bindings determine behavior.
 - **One telemetry model:** reusable visual components bind to existing logical `Channel` UUIDs rather than creating a parallel sensor/control model.
 - **One UI:** server-backed and browser-only deployments use the same screens, entity selection, 3D twin, and interaction model.
 - **Typed domain:** use explicit agricultural and control concepts rather than a generic everything-is-an-asset database.
@@ -157,11 +158,27 @@ validated component registry
 primitive / GLB renderer
 ```
 
+The target component semantic model is:
+
+```text
+category      -> broad human-facing group (sensor, lighting, structure, ...)
+subtype       -> specific family (ph, led_panel, grow_tent, rack, ...)
+capabilities  -> GrowNerve-supported workflows/behavior
+channel_slots -> compatible existing Channel bindings
+ports         -> physical/topological connections
+anchors       -> mounting/snap points
+properties    -> reusable technical characteristics
+```
+
+The documented taxonomy covers structures, tents, racks/shelves, reservoirs/containers, plant supports, plants, lighting, air, water, nutrients/dosing hardware, sensors, actuators, climate, electrical, controllers, networking, vision, safety, storage, virtual components, and assemblies. The first implementation remains intentionally much smaller and expands only when a real UI/application consumer exists.
+
 Important constraints:
 
 - keep `(entity_type, entity_id)` as the operational scene identity
 - exact immutable component revision = ID + SemVer + SHA-256 digest
 - bind reusable component channel slots to existing `Channel` UUIDs
+- category/tag metadata never grants behavior, permissions, automation authority, or safety behavior
+- add formal capabilities only when GrowNerve has a concrete consumer and precise validation semantics
 - keep large immutable GLB/texture assets outside the whole `FarmData` snapshot
 - preserve archive schema v1 and introduce component dependencies through explicit archive v2 migration
 - no arbitrary JavaScript/WebAssembly/shader/network code in component packs
@@ -191,6 +208,7 @@ Key documents:
 - [Development, operations, and commissioning](docs/23-development-and-operations.md)
 - [Component and plugin system](docs/24-component-plugin-system.md)
 - [MCP component authoring and farm editing](docs/25-mcp-component-authoring.md)
+- [Component taxonomy, capabilities, and information surfaces](docs/26-component-taxonomy-and-capabilities.md)
 - [ESP32 reference firmware](firmware/esp32/README.md)
 
 ## Relationship to farmOS
@@ -205,7 +223,7 @@ No farmOS source code is copied into this project.
 
 The executable V0 software baseline is implemented: browser-only IndexedDB/PWA operation, the operational React UI and WebGPU-first digital twin, Go/PostgreSQL/MQTT server mode with authentication and role enforcement, compare-and-swap state concurrency, relational telemetry with bounded history, continuous server-side alert evaluation, server-sent live updates, durable command delivery, validated image media storage, an ESP32 reference firmware target, migrations, containers, CI, and automated unit/integration/E2E coverage.
 
-The generic JSON component registry, third-party component packs, component GLB storage/import, archive v2, ports/anchors, and MCP server described in the extensibility documents are **planned and not implemented yet**.
+The generic JSON component registry, third-party component packs, component GLB storage/import, archive v2, ports/anchors, richer taxonomy-driven renderer, and MCP server described in the extensibility documents are **planned and not implemented yet**.
 
 Everything proven only against the simulator says so. Nothing in this repository can energize real equipment by default, and automatic nutrient or pH dosing is not implemented.
 
