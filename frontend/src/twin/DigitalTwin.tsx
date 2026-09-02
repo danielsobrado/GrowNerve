@@ -126,7 +126,7 @@ function Scene({ data, latest, selection, onSelect }: { data: FarmData; latest: 
 
 export function DigitalTwin({ data, selection, onSelect, onAction }: { data: FarmData; selection?: Selection; onSelect: (selection: Selection) => void; onAction: (action: string) => void }) {
   const [renderer, setRenderer] = useState<"starting" | "webgpu" | "webgl">("starting");
-  const latest = useMemo(() => latestMeasurementsByChannel(data), [data.measurements]);
+  const latest = useMemo(() => latestMeasurementsByChannel(data), [data]);
   const selectedBinding = selection && data.scene_layouts[0]?.entities.find((entry) => entry.entity_type === selection.type && entry.entity_id === selection.id);
   const selectedTooltip = selectedBinding ? tooltipFor(data, latest, selectedBinding) : undefined;
   const createRenderer = async (options: WebGLRendererParameters) => {
