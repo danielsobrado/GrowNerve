@@ -14,6 +14,8 @@ var (
 	ErrNotFound = errors.New("farm state not found")
 	// ErrVersionConflict reports that the state changed between load and save.
 	ErrVersionConflict = errors.New("farm state version conflict")
+	// ErrInvalidState reports content that cannot be stored as a JSON document.
+	ErrInvalidState = errors.New("farm state is not valid JSON")
 )
 
 // AnyVersion saves unconditionally. Use it only where the caller genuinely owns
@@ -94,7 +96,10 @@ type MemoryStore struct {
 
 func NewMemoryStore() *MemoryStore { return &MemoryStore{} }
 
-func (store *MemoryStore) Load(_ context.Context) (json.RawMessage, int64, error) {
+func (store *MemoryStore) Load(ctx context.Context) (json.RawMessage, int64, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, NoVersion, err
+	}
 	store.mu.RLock()
 	defer store.mu.RUnlock()
 	if len(store.state) == 0 {
@@ -103,9 +108,18 @@ func (store *MemoryStore) Load(_ context.Context) (json.RawMessage, int64, error
 	return append(json.RawMessage(nil), store.state...), store.version, nil
 }
 
-func (store *MemoryStore) Save(_ context.Context, state json.RawMessage, expected int64) (int64, error) {
+func (store *MemoryStore) Save(ctx context.Context, state json.RawMessage, expected int64) (int64, error) {
+	if err := ctx.Err(); err != nil {
+		return store.version, err
+	}
+	if !json.Valid(state) {
+		return store.version, ErrInvalidState
+	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return store.version, err
+	}
 	if expected != AnyVersion && expected != store.version {
 		return store.version, ErrVersionConflict
 	}
