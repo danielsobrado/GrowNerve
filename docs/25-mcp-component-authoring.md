@@ -2,572 +2,442 @@
 
 ## Purpose
 
-GrowNerve should expose component and farm-layout authoring through MCP so an AI agent can create, inspect, validate, place, and connect components without understanding Three.js internals or editing repository files directly.
+GrowNerve should expose component authoring and farm-layout editing through MCP so an AI agent can create, validate, place, and connect components without generating Three.js code or editing repository files directly.
 
-The MCP layer is an adapter over GrowNerve application services.
-
-The core rule is:
+The MCP server is an adapter over GrowNerve application/domain services.
 
 ```text
-MCP does not manipulate Three.js.
-MCP does not bypass validation.
-MCP does not write arbitrary files as its domain API.
-MCP calls the same component/farm services used by the normal product UI.
+MCP tool call
+   -> authentication / authorization
+   -> component or farm service
+   -> validation / compare-and-swap
+   -> normal persistence
 ```
 
-This gives AI-assisted authoring the same invariants, permissions, safety checks, versioning, and import/export behavior as human-driven workflows.
+MCP does not own a second data model and does not get a privileged write path.
 
-See `24-component-plugin-system.md` for the component model.
+See `24-component-plugin-system.md` for the component contract and the migration from the current profile-based twin.
 
-## Goals
+## Current code baseline
 
-MCP should make workflows such as these possible:
+There is no MCP server in the repository today.
 
-- "Create a generic 30 L rectangular reservoir, 60 x 40 x 25 cm."
-- "Add a pH probe to the reservoir and bind it to the reservoir pH channel."
-- "Create a reusable aeration assembly from an air pump, tubing, and two air stones."
-- "List every component with the `calibration` capability."
-- "Validate this community component pack before I import it."
-- "Place four net pots evenly across the reservoir lid."
-- "Show me missing component dependencies in this farm archive."
-- "Clone this LED definition and make a generic 240 W version using primitive geometry until I provide a GLB."
+The implementation should fit the architecture that already exists:
 
-## Non-goals
+- the authoritative full runtime is Go.
+- `cmd/api` is the current server entry point.
+- farm configuration is one versioned JSON document protected by compare-and-swap.
+- `internal/farm` owns the state-write/concurrency boundary.
+- `internal/farm/authz.go` already separates viewer/operator/manager/administrator authorization.
+- command safety is separate from authorization.
+- browser mode uses the same `FarmData` model through a Dexie repository.
+- the frontend's server adapter talks to the HTTP API; it does not expose internal Go services.
+- the component registry described in document 24 has not been implemented yet.
 
-V0 MCP is not:
+Therefore MCP should be added **after** component/layout services exist, not before them.
 
-- a direct filesystem editor
-- a code generator that injects JavaScript into the browser
-- a way to bypass component-pack validation
-- a way to bypass domain authorization or actuator safety
-- a general 3D modeling replacement for Blender/CAD tools
-- a remote-control protocol for raw MQTT topics
+## Protocol baseline
 
-## Architecture
+Target MCP protocol revision **2026-07-28**.
+
+At the time of this document, that revision is the current stable MCP specification and the official Go SDK supports it in the v1.7+ line.
+
+Relevant upstream references:
+
+- <https://modelcontextprotocol.io/specification/2026-07-28>
+- <https://github.com/modelcontextprotocol/go-sdk>
+
+Important consequences for GrowNerve:
+
+- the 2026-07-28 core protocol is stateless; do not design application correctness around MCP transport sessions.
+- every cross-call workflow state must be represented by explicit GrowNerve IDs/handles.
+- tool input/output schemas use JSON Schema 2020-12.
+- tool/resource listings should be deterministic so clients can cache them reliably.
+- deprecated MCP roots/sampling/logging features are not needed for this integration.
+- use normal application logging/OpenTelemetry conventions rather than MCP's deprecated logging feature.
+
+If GrowNerve later targets a newer MCP revision, update this document/ADR deliberately rather than silently changing semantics.
+
+## Recommended deployment shape
+
+### First implementation: integrated Go HTTP MCP endpoint
+
+Prefer one MCP package inside the current Go modular monolith and expose it through the existing API process:
 
 ```text
-          ChatGPT / agent / MCP client
-                     |
-                     v
-              GrowNerve MCP
-                     |
-                     v
-          Application service layer
-          /          |           \
-         v           v            v
- Component       Farm layout     Import/export
- services        services        services
-         \           |            /
-          +----------+-----------+
-                     |
-                     v
-       domain validation / registry
-                     |
-          +----------+-----------+
-          |                      |
-          v                      v
-      server mode            browser/tooling
+cmd/api
+  |
+  +-- normal GrowNerve HTTP API
+  |
+  +-- /mcp
+        |
+        v
+   internal/mcpserver
+        |
+        +-- component services
+        +-- farm/layout services
+        +-- existing auth/audit boundaries
 ```
 
-The MCP adapter should depend on stable application interfaces. It should not call HTTP endpoints internally merely because the user-facing application also has an HTTP API.
+Why this is the best first shape:
 
-Where GrowNerve is deployed as a remote service, an MCP transport process may call the server API, but the exposed MCP contract must remain domain-oriented.
+- reuses the existing Go runtime instead of adding a Node sidecar.
+- reuses the same configuration, logging, database pool, authentication, and authorization infrastructure.
+- can mutate farm state through the same compare-and-swap path.
+- avoids one service calling another service over localhost HTTP just to reach its own domain logic.
+- can still be used by local MCP clients against `http://localhost:<port>/mcp`.
 
-## Safety boundary
+### Do not start with a separate stdio daemon
 
-Component authoring and farm editing are configuration operations. Physical actuator commands remain separate.
+A standalone stdio process would either duplicate storage/business logic or call the API as a second client. Neither is needed for the first proof.
 
-If future MCP tools expose real actuator command intent, they must go through the normal command workflow:
+A stdio adapter may be added later for tooling if a concrete host requires it. It should wrap the same `internal/mcpserver` handlers/services, not reimplement them.
+
+### Browser-only runtime
+
+A static GitHub Pages application cannot host a normal network-listening MCP server.
+
+Browser-only mode therefore remains independent from MCP. Agents can create portable component packs/project archives through the full/local Go runtime and the browser can import them through the normal validated import path.
+
+Do not make browser-only usability depend on an MCP connection.
+
+## Security boundary
+
+MCP is another authenticated client, not an administrator shortcut.
+
+The same separation remains mandatory:
 
 ```text
-MCP command request
- -> authentication/authorization
- -> domain validation
- -> safety/interlock validation
- -> durable command record
- -> device transport
- -> acknowledgement/state telemetry
+authorization: may this caller request this operation?
+safety:        is this physical operation safe right now?
 ```
 
-An MCP caller never gets a privileged path around the existing control model.
+Component/layout authoring is configuration editing. The initial role mapping should reuse existing actions instead of inventing a parallel permission system:
+
+```text
+read component/layout state       -> viewer / farm.read
+mutate farm layout bindings       -> manager / farm.write_state
+install global component packs    -> administrator / system.administer
+issue low-risk actuator command   -> operator / command.issue + safety validation
+```
+
+Only create finer-grained actions such as `component.install` when a real authorization need appears.
+
+If future MCP tools expose physical commands, they call the existing command service and retain durable delivery, expiry, idempotency, interlocks, and acknowledgement semantics.
 
 ## Tool design rules
 
-MCP tools should be:
+Tools should be:
 
-- small and composable
-- domain named
-- deterministic where possible
-- explicit about dry-run versus mutation
-- version-aware
-- safe to retry when documented as idempotent
-- structured enough that agents do not need to parse free-form prose
+- narrow and composable
+- deterministic where practical
+- closed-domain by default
+- explicit about exact component revision and farm version
+- structured on input and output
+- safe to retry only when their contract says so
+- consistent with existing domain naming
 
-Avoid one giant tool such as:
+Avoid a giant prompt-shaped mutation tool such as:
 
 ```text
 edit_grownerve_project(instructions: string)
 ```
 
-Prefer explicit operations that expose validation failures as structured results.
+That would move validation and intent parsing into an opaque mutation boundary and make concurrency/audit behavior difficult to reason about.
 
-## Initial component tools
+## MCP schema rules
 
-### `components.list`
+For every tool:
 
-Purpose:
+- define `inputSchema` and `outputSchema` using JSON Schema 2020-12.
+- use an object input root.
+- default contract objects to `additionalProperties: false`.
+- use enums for known operation modes and error codes.
+- return structured results; human-readable text is supplementary.
+- keep schema depth bounded and do not dereference untrusted external `$ref` URIs.
 
-List available component definitions with optional filters.
+Tool-level validation is not a replacement for domain validation. The handler validates again using the normal component/farm services.
 
-Filters may include:
+## Tool annotations
 
-- category
-- tag
-- capability
-- namespace/pack
-- model type
-
-Return only summary metadata unless detailed definitions are requested separately.
-
-### `components.get`
-
-Purpose:
-
-Return one normalized component definition by stable ID and version.
-
-Inputs:
+Use standard MCP annotations accurately:
 
 ```text
-id
-version | resolved version
+readOnlyHint
+destructiveHint
+idempotentHint
+openWorldHint
 ```
-
-Output includes the content hash used for conflict/reproducibility checks.
-
-### `components.search`
-
-Purpose:
-
-Search component metadata by human terms such as "water level sensor" or "240 W LED".
-
-Search is over installed/available registry metadata. A future remote catalog may be an additional explicitly selected source.
-
-### `components.schema`
-
-Purpose:
-
-Return the current authoring schema or a focused sub-schema.
 
 Examples:
 
 ```text
-component
-plugin
-primitive-model
-port
-anchor
-assembly
+components.list
+  readOnlyHint: true
+  openWorldHint: false
+
+components.create
+  readOnlyHint: false
+  destructiveHint: false
+  idempotentHint: true only when exact revision/digest semantics make retries safe
+  openWorldHint: false
+
+components.install_pack
+  readOnlyHint: false
+  destructiveHint: false
+  openWorldHint: false
 ```
 
-This helps an AI author valid JSON without embedding schema knowledge into the MCP client.
+These are client hints, not security controls. GrowNerve authorization/validation remains authoritative even if a client ignores annotations.
+
+## Tool names
+
+Dot-separated names are valid in the current MCP tool-name guidance and read well for this domain.
+
+Keep them stable once published:
+
+```text
+components.list
+components.get
+components.validate
+components.create
+farms.get_layout
+farms.set_component
+farms.validate_layout
+projects.validate_import
+```
+
+Do not rename tools casually; agents and cached tool catalogs may depend on them.
+
+## Minimal V0 tool surface
+
+The first MCP proof should remain small enough to test exhaustively.
+
+### `components.list`
+
+Read-only list/search over the installed registry.
+
+Inputs may include:
+
+```text
+query
+category
+capability
+pack_id
+limit
+cursor
+```
+
+Return compact summaries in deterministic order.
+
+Do not mix remote marketplace search into this tool in V0.
+
+### `components.get`
+
+Return one exact normalized revision.
+
+Input:
+
+```json
+{
+  "component_id": "grownerve.sensor.ph.generic",
+  "version": "1.0.0",
+  "digest": "sha256:..."
+}
+```
+
+If digest is omitted for an interactive lookup, the server may return available exact revisions, but a farm write must always persist a resolved exact digest.
 
 ### `components.validate`
 
-Purpose:
+Validate a candidate component JSON without storing it.
 
-Validate an uninstalled component definition or pack.
-
-Validation levels:
-
-```text
-schema
-semantic
-references
-assets
-all
-```
-
-Return structured diagnostics:
+Output shape:
 
 ```json
 {
   "valid": false,
   "errors": [
     {
-      "code": "COMPONENT_DIMENSION_INVALID",
-      "path": "/dimensions/height",
-      "message": "height must be greater than zero"
+      "code": "COMPONENT_SCHEMA_INVALID",
+      "path": "/model/parameters/height_m",
+      "message": "height_m must be greater than zero"
     }
   ],
   "warnings": []
 }
 ```
 
-Do not return only a prose blob.
+Validation uses the same schema fixtures and semantic validator as browser/server import.
 
 ### `components.create`
 
-Purpose:
+Create one immutable local component revision.
 
-Create a new local component definition through the application service.
+V0 scope is deliberately limited to definitions that use primitive geometry and existing local assets already known to the component service.
 
-V0 supports declarative content only.
+Inputs include the complete candidate definition and an optional caller `request_id`.
 
-Expected use:
-
-1. caller gets schema if needed
-2. caller submits candidate definition
-3. service validates
-4. service stores definition only if valid
-5. result returns stable ID, version, and content hash
-
-The service must reject an attempt to overwrite an existing `id` + `version` with different content.
-
-### `components.clone`
-
-Purpose:
-
-Create a new component definition using another definition as a starting point.
-
-The caller must provide a new stable ID or allowed local namespace identity.
-
-Cloning must not silently preserve vendor branding/license metadata that is not appropriate for the new definition.
-
-### `components.update`
-
-Purpose:
-
-Create a new component version from an existing local component.
-
-Published/imported immutable versions are not edited in place.
-
-Conceptual behavior:
+Idempotency rule:
 
 ```text
-1.0.0 -> draft changes -> 1.0.1 / 1.1.0 / 2.0.0
+same component_id + version + digest -> return existing revision
+same component_id + version + different digest -> conflict
 ```
 
-The service may provide compatibility guidance but must not invent the version bump automatically without caller intent in V0.
-
-### `components.delete`
-
-Purpose:
-
-Delete an unpublished/local definition version when nothing depends on it.
-
-Reject deletion if a farm/assembly references it unless the caller first migrates/removes those references.
-
-### `components.install_pack`
-
-Purpose:
-
-Validate and install a component pack.
-
-The MCP tool accepts a file/reference supplied by the host environment; it does not fetch arbitrary Internet URLs by default.
-
-Return:
-
-- pack ID/version
-- installed component IDs/versions
-- warnings
-- resolved/conflicting dependencies
-
-### `components.export_pack`
-
-Purpose:
-
-Create a portable ZIP for one local pack or selected local definitions and assets.
-
-## Asset tools
-
-Assets need explicit tools because binary/model validation is separate from JSON authoring.
-
-### `assets.attach_model`
-
-Attach a supplied GLB/glTF asset to a local draft component.
-
-Requirements:
-
-- content/type validation
-- size limits
-- path normalization
-- model inspection before activation
-
-### `assets.attach_thumbnail`
-
-Attach a supported image thumbnail.
-
-### `assets.inspect_model`
-
-Return useful model metadata without requiring the MCP client to parse GLB:
-
-- bounding dimensions
-- node/mesh count
-- triangle count where available
-- material count
-- texture count/sizes
-- animation names
-- detected unit/pivot warnings where inferable
-
-### `assets.validate_model`
-
-Validate against GrowNerve runtime budgets/policy.
-
-Validation warnings may include:
-
-- oversized geometry
-- excessive texture dimensions
-- unexpected external references
-- unsupported extension
-- implausible dimensions
-- pivot/origin far outside bounds
-
-## Primitive-model authoring
-
-Primitive geometry is essential for MCP because an AI should be able to create useful components before an authored GLB exists.
-
-Example user request:
-
-```text
-Create a black 30 L DWC reservoir, 60 x 40 x 25 cm.
-```
-
-Possible MCP sequence:
-
-```text
-components.schema(primitive-model)
-components.create(... box primitive ...)
-components.validate(...)
-```
-
-The renderer owns how a primitive becomes Three.js geometry.
-
-MCP only supplies validated primitive parameters.
-
-## Farm-layout tools
+This makes network retries safe without a hidden MCP session.
 
 ### `farms.get_layout`
 
-Return the normalized layout for a farm or scene.
+Return:
 
-### `farms.validate_layout`
+```text
+farm version
+scene layout
+resolved component refs
+missing dependencies
+```
 
-Validate:
+The `farm_version` is the existing farm-state concurrency token, not a new MCP-only version.
 
-- component dependencies
-- transforms
-- domain bindings
-- assemblies
-- connections
-- referenced ports/anchors
+### `farms.set_component`
 
-### `farms.add_component`
+Upsert the component reference/configuration for an existing operational scene entity identified by:
+
+```text
+entity_type
+entity_id
+```
+
+This intentionally matches the current `SceneEntity` identity model.
 
 Inputs conceptually include:
 
-```text
-farmId
-component id/version
-instance id or generated id
-transform
-configuration
-bindings
+```json
+{
+  "farm_version": 42,
+  "layout_id": "uuid",
+  "entity_type": "device",
+  "entity_id": "uuid",
+  "component_ref": {
+    "component_id": "grownerve.air.circulation-fan.generic",
+    "version": "1.0.0",
+    "digest": "sha256:..."
+  },
+  "position": [0, 0, 0],
+  "rotation": [0, 0, 0],
+  "scale": [1, 1, 1],
+  "channel_bindings": {}
+}
 ```
 
-The service validates the definition exists before writing the instance.
+The handler:
 
-### `farms.remove_component`
+1. checks authorization.
+2. loads the requested farm version.
+3. validates component revision availability.
+4. validates entity/domain references.
+5. validates channel bindings.
+6. writes through the existing compare-and-swap state boundary.
+7. returns the new farm version.
 
-Reject removal when unresolved connection/assembly dependencies would be left behind unless the request explicitly includes a valid cascading operation supported by the service.
+Using an upsert against the existing entity key makes safe retries easier than creating arbitrary duplicate scene-instance IDs.
 
-### `farms.move_component`
+### `farms.validate_layout`
 
-Updates only transform/placement state.
-
-Do not route movement through component-definition update APIs.
-
-### `farms.configure_component`
-
-Updates allowed instance configuration and bindings.
-
-Generic definition metadata remains immutable.
-
-### `farms.connect_components`
-
-Inputs identify source/target instance and port IDs.
-
-Validation checks compatibility before committing the connection.
-
-### `farms.disconnect_components`
-
-Removes an existing connection by stable connection ID.
-
-### `farms.place_on_anchor`
-
-Later tool for snap/placement workflows.
-
-The service resolves compatible anchors and computes/stores an explicit resulting transform. The persisted farm remains readable without replaying hidden snap logic.
-
-### `farms.list_missing_dependencies`
-
-Useful after import or when opening an older project.
-
-Returns exact missing component IDs/versions/hashes.
-
-## Assembly tools
-
-### `assemblies.create`
-
-Create a reusable assembly from component instances and internal connections.
-
-### `assemblies.get`
-
-Return the normalized assembly definition.
-
-### `assemblies.instantiate`
-
-Place a reusable assembly into a farm with a root transform.
-
-### `assemblies.validate`
+Read-only validation of the current or supplied candidate layout.
 
 Checks:
 
 - component dependencies
-- cycles
-- connection validity
-- duplicate child IDs
-- transform validity
+- exact revision digests
+- entity references
+- transform finiteness
+- channel bindings
+- ports/connections when implemented
 
-## Import/export tools
+## Tools to add only after V0 proves useful
 
-### `projects.validate_import`
+Do not publish a large speculative surface at the start.
 
-Performs non-destructive validation of a `.grownerve.json` or bundled archive.
-
-### `projects.import`
-
-Runs the same transactional import path as the product UI.
-
-MCP must not have a separate "force" path that skips validation.
-
-### `projects.export`
-
-Exports the normal portable farm archive and, when requested, a bundled archive containing required local component assets.
-
-## Suggested MCP resources
-
-In addition to invokable tools, MCP resources can expose read-only material useful to agents:
+Later tools may include:
 
 ```text
-grownerve://schemas/component/current
-grownerve://schemas/plugin/current
-grownerve://schemas/farm-layout/current
-grownerve://registry/components
-grownerve://farm/{id}/layout
+components.install_pack
+components.export_pack
+components.create_revision
+assets.inspect_model
+assets.validate_model
+farms.remove_component
+farms.connect_components
+farms.disconnect_components
+assemblies.create
+assemblies.instantiate
+projects.validate_import
+projects.import
+projects.export
+```
+
+Each arrives with its storage/validation use case and tests.
+
+## Pack installation
+
+When pack installation is added, keep it separate from component authoring.
+
+`components.install_pack`:
+
+- accepts a host-supplied file/blob reference or already-uploaded GrowNerve asset handle.
+- does not fetch arbitrary Internet URLs.
+- runs all ZIP/path/size/digest/JSON/model validation from document 24.
+- commits the pack atomically only after the complete pack validates.
+- requires administrator-level authorization initially.
+
+If the pack is already installed with the same pack revision/digest, return success idempotently.
+
+## Model assets and stateless MCP
+
+Do not create implicit "current draft" state tied to an MCP connection. The current protocol is stateless at its core.
+
+When multi-step asset authoring is eventually required, use an explicit GrowNerve draft ID:
+
+```text
+components.begin_draft -> draft_id
+assets.attach_model(draft_id, ...)
+components.validate_draft(draft_id)
+components.publish_draft(draft_id, version)
+```
+
+The draft is normal GrowNerve application state with ownership, expiry, audit records, and cleanup. It is not an MCP session variable.
+
+Primitive-only V0 avoids needing this complexity.
+
+## Resources
+
+Use MCP resources for read-only material that is useful across many calls.
+
+Suggested resources:
+
+```text
+grownerve://schemas/component/1
+grownerve://schemas/pack/1
 grownerve://docs/component-authoring
+grownerve://registry/components/<component-id>/<version>/<digest>
 ```
 
-Resources should not be the only way to mutate state.
+Avoid using one enormous `grownerve://registry/components` document when the catalog grows. List/search tools are a better paginated interface.
 
-## Example workflow — create a pH sensor
+Schemas/resources are versioned and deterministic so clients can cache them.
 
-User:
+## Structured results and errors
 
-```text
-Create a generic pH probe component with a 0-14 pH telemetry channel and a calibrate action.
-```
+Tool validation/domain failures should return an MCP tool result marked as an error with structured error content, not misuse transport/protocol errors for ordinary business rejection.
 
-Expected agent flow:
-
-```text
-components.schema(component)
-       |
-       v
-construct candidate definition
-       |
-       v
-components.validate(candidate)
-       |
-       +-- invalid -> repair candidate -> validate again
-       |
-       v
-components.create(candidate)
-       |
-       v
-return ID/version/hash
-```
-
-No Three.js code is generated.
-
-## Example workflow — add a sensor to a real reservoir
-
-User:
-
-```text
-Add the generic pH probe to reservoir R1 and bind it to the reservoir pH channel.
-```
-
-Expected flow:
-
-```text
-components.search("generic pH")
-farms.get_layout(farm)
-resolve reservoir instance/domain binding
-resolve logical pH channel
-farms.add_component(...)
-farms.configure_component(bindings...)
-farms.validate_layout(farm)
-```
-
-If a physical placement anchor exists, the agent may additionally call `farms.place_on_anchor`.
-
-## Example workflow — create an aeration assembly
-
-User:
-
-```text
-Make an assembly with one air pump, two air stones and tubing so I can reuse it in another reservoir.
-```
-
-Expected flow:
-
-```text
-components.search("air pump")
-components.search("air stone")
-components.search("tube")
-assemblies.create(children + transforms + connections)
-assemblies.validate(...)
-```
-
-The assembly references existing definitions; it does not duplicate them.
-
-## Example workflow — missing vendor component
-
-User:
-
-```text
-Add my new DFRobot EC sensor.
-```
-
-MCP should first search the installed registry.
-
-```text
-components.search("DFRobot EC")
-```
-
-If not found, the agent can create a local definition from information the user provides or from independently retrieved authoritative product data when the host environment permits web research.
-
-The MCP server itself should not silently scrape the web.
-
-## Validation and error model
-
-Use stable machine-readable error codes.
-
-Examples:
+Use stable GrowNerve error codes such as:
 
 ```text
 COMPONENT_NOT_FOUND
 COMPONENT_VERSION_CONFLICT
+COMPONENT_DIGEST_MISMATCH
 COMPONENT_SCHEMA_INVALID
 COMPONENT_SEMANTIC_INVALID
 PACK_ASSET_MISSING
@@ -575,250 +445,331 @@ PACK_PATH_INVALID
 PACK_TOO_LARGE
 MODEL_FORMAT_UNSUPPORTED
 MODEL_BUDGET_EXCEEDED
+CHANNEL_BINDING_INVALID
 PORT_NOT_FOUND
 PORT_INCOMPATIBLE
-ANCHOR_NOT_FOUND
-ASSEMBLY_CYCLE
 FARM_LAYOUT_INVALID
 FARM_DEPENDENCY_MISSING
-DOMAIN_BINDING_INVALID
+FARM_VERSION_CONFLICT
 PERMISSION_DENIED
 SAFETY_REJECTED
 ```
 
-Each error may include:
+Example output:
 
-```text
-code
-message
-path/entity id
-details
-recoverable flag
+```json
+{
+  "ok": false,
+  "error": {
+    "code": "FARM_VERSION_CONFLICT",
+    "message": "Farm state changed; read the current layout and retry",
+    "recoverable": true,
+    "current_farm_version": 43
+  }
+}
 ```
 
-Agents should not need to string-match human error text.
-
-## Idempotency and retries
-
-Read operations are naturally retryable.
-
-Mutation tools should support safe retry where useful.
-
-Preferred techniques:
-
-- caller-provided request/idempotency key for create/install/import operations
-- stable caller-provided instance IDs where appropriate
-- optimistic version checks for farm-layout mutation
-- immutable component versions
-
-Do not make `create` return a different component every time the same transport request is retried.
+Agents must not need to parse English error strings to decide what to do next.
 
 ## Concurrency
 
-Farm-layout writes follow the same optimistic concurrency model as other farm state.
+GrowNerve already has the concurrency contract MCP needs.
 
-A tool mutating a farm should accept/return the relevant farm/layout version or equivalent concurrency token.
-
-On conflict:
+The server farm store uses optimistic compare-and-swap. MCP layout writes reuse that exact version.
 
 ```text
-FARM_VERSION_CONFLICT
+farms.get_layout -> farm_version 42
+farms.set_component(expected 42)
+    |
+    +-- success -> version 43
+    |
+    +-- conflict -> FARM_VERSION_CONFLICT
 ```
 
-The agent must re-read and reconcile instead of silently overwriting another user's work.
+On conflict the agent re-reads and reconciles. It never force-writes through the conflict.
 
-## Permissions
+Do not add a second independent `layout_version` until layouts are persisted independently from the farm document.
 
-MCP authorization is capability-based at the application boundary.
+## Idempotency
 
-Example permission classes:
+Different mutation classes use different existing invariants.
+
+### Immutable component revision
+
+Idempotent by exact identity/digest:
 
 ```text
-components.read
-components.author
-components.install
-farm.read
-farm.layout.edit
-farm.binding.edit
-project.import
-project.export
+(component_id, version, digest)
 ```
 
-If future real actuator tools exist, they use the existing command permissions and safety checks instead of component-authoring permissions.
+### Scene binding upsert
+
+Idempotent when the same farm version/entity binding/request payload is applied once. A retried write after a successful version change receives a version conflict and must re-read rather than duplicate an entity.
+
+### Physical command
+
+Use the existing command idempotency/durable command path. MCP does not invent a second command system.
 
 ## Auditability
 
-Meaningful MCP mutations should record actor/source metadata such as:
+Meaningful MCP writes should extend the existing audit approach.
+
+Record:
 
 ```text
-actor identity
+actor subject
 source = mcp
 tool name
-request/idempotency ID
+request_id when supplied
+component/farm/entity identifiers
+previous/new farm version where relevant
+result/error code
 timestamp
-affected farm/component IDs
-result
 ```
 
-Do not log full binary assets or secrets.
+Do not log:
 
-## Browser-only implications
+- bearer tokens
+- secrets
+- complete binary assets
+- entire user prompts as a normal operational requirement
 
-A static GitHub Pages deployment cannot itself expose a normal network-listening MCP server from the browser.
+The audit record should describe the mutation, not capture the model's private reasoning.
 
-Therefore MCP has three practical deployment modes:
+## Authentication and remote MCP
 
-### Full runtime MCP
+The integrated `/mcp` endpoint uses the same production authentication posture as the rest of GrowNerve.
 
-A server-side MCP adapter uses GrowNerve application services directly.
+For remote deployments:
 
-### Local tooling MCP
+- require TLS at the normal reverse-proxy boundary.
+- reuse current bearer/OIDC principal resolution where compatible with the SDK transport.
+- authorize every tool call independently; do not assume prior calls established a trusted session.
+- bind credentials to the configured issuer/provider and follow the current MCP/OAuth security guidance when native MCP authorization is introduced.
 
-A developer/desktop MCP process reads/writes GrowNerve portable project/component packs through the same schemas and validators, then the user imports the resulting archive into browser mode.
+Do not enable anonymous remote MCP simply because the local development server is easy to reach.
 
-### Future browser bridge
+## Open-world behavior
 
-A browser extension/desktop companion could bridge to an open GrowNerve browser session later, but this is not required for V0.
+GrowNerve MCP is closed-domain by default.
 
-The component file formats are deliberately independent of MCP so static hosting is never dependent on an agent connection.
+The server itself should not:
 
-## Security
+- scrape vendor websites
+- perform arbitrary web searches
+- install from arbitrary URLs
+- follow URLs found inside component metadata
 
-MCP must not weaken the declarative plugin security model.
+If an MCP host has its own web-research capability, the agent may use that capability to gather authoritative product information and then submit a candidate definition to GrowNerve validation.
 
-Rules:
+This keeps untrusted web retrieval outside the component registry trust boundary.
 
-- no arbitrary script injection into packs
-- no arbitrary filesystem paths
-- no arbitrary remote URL fetch by the GrowNerve MCP server
-- validate every supplied archive/asset
-- enforce pack/model size limits
-- normalize and constrain paths
-- do not allow an MCP caller to register a component by directly editing registry storage
-- imported Markdown/text is treated as untrusted content
-- component metadata cannot grant permissions
+## Example — create a generic pH component
 
-## Observability
+User intent:
 
-Record metrics/logs for:
+```text
+Create a generic pH probe with a 0-14 pH measurement slot.
+```
 
-- tool invocation count/result
-- validation failure codes
-- component install/import failures
-- model validation duration
-- pack sizes
-- farm-layout conflicts
+Agent flow:
 
-Do not record user prompts as a requirement for normal operational metrics.
+```text
+read grownerve://schemas/component/1
+        |
+        v
+construct primitive component definition
+        |
+        v
+components.validate
+        |
+        +-- invalid -> repair -> validate
+        |
+        v
+components.create
+        |
+        v
+return exact component_id/version/digest
+```
+
+No Three.js source file is generated.
+
+## Example — bind that component to an existing sensor entity
+
+```text
+components.list(query="pH probe")
+farms.get_layout
+resolve existing domain entity + channel UUID
+farms.set_component(expected farm_version, component_ref, channel_bindings)
+farms.validate_layout
+```
+
+If the farm changes between read and write, the last mutation returns `FARM_VERSION_CONFLICT`; the agent re-reads rather than overwriting another user's edit.
+
+## Example — vendor component not installed
+
+User intent:
+
+```text
+Add my DFRobot EC sensor.
+```
+
+GrowNerve MCP first searches only its installed registry:
+
+```text
+components.list(query="DFRobot EC")
+```
+
+If no exact definition exists, the agent may construct a local candidate from user-supplied or independently researched authoritative data and call `components.validate`/`components.create`.
+
+The GrowNerve MCP server does not silently crawl the web.
+
+## Testing
+
+### Protocol tests
+
+Use the official MCP Inspector and SDK test clients against the integrated `/mcp` endpoint.
+
+Verify:
+
+- current protocol negotiation/discovery
+- deterministic `tools/list`
+- tool schemas are valid JSON Schema 2020-12
+- output conforms to each `outputSchema`
+- annotations match real behavior
+- read-only tools do not mutate state
+- protocol/business errors are separated correctly
+
+### Domain parity tests
+
+For the same candidate payload, assert equivalent accept/reject behavior through:
+
+```text
+component validator directly
+normal HTTP/UI import path
+MCP tool
+```
+
+### Concurrency tests
+
+Reuse the existing farm concurrency strategy:
+
+- two MCP writers read the same farm version.
+- one wins.
+- the second receives a version conflict.
+- no scene binding is silently lost.
+
+### Authorization tests
+
+At minimum:
+
+```text
+viewer  -> can read, cannot mutate
+operator -> does not gain configuration-edit rights from MCP
+manager -> can edit farm layout
+admin   -> can install global packs when that tool exists
+```
+
+### Security tests
+
+When pack tools arrive, cover malicious ZIP paths, oversized archives, digest mismatches, unsupported model content, and attempts to smuggle executable files.
 
 ## Implementation plan
 
-### M1 — Read-only MCP
+### M0 — Do not implement MCP yet
+
+Finish the component schemas, registry service, additive `SceneEntity` migration, and generic primitive renderer first.
+
+Exit criterion:
+
+- the application can create/validate/use components without MCP.
+
+### M1 — Integrated read-only MCP
 
 Deliver:
 
-- `components.list`
-- `components.get`
-- `components.search`
-- `components.schema`
-- `farms.get_layout`
-- validation resources/docs
+```text
+/mcp in Go API
+components.list
+components.get
+components.validate
+farms.get_layout
+schema resources
+```
 
-Exit criteria:
+Exit criterion:
 
-- an MCP client can understand the installed component model without repo access
+- an MCP client can inspect the real registry/layout without repository access.
 
-### M2 — Validation and local authoring
-
-Deliver:
-
-- `components.validate`
-- `components.create`
-- `components.clone`
-- versioned `components.update`
-- primitive model authoring
-
-Exit criteria:
-
-- an agent can create a valid primitive component entirely through MCP
-
-### M3 — Asset authoring
+### M2 — Primitive component authoring
 
 Deliver:
 
-- attach/inspect/validate model
-- attach thumbnail
-- pack export
+```text
+components.create
+```
 
-Exit criteria:
+Exit criterion:
 
-- an agent can combine supplied GLB assets with a valid definition without direct filesystem editing
+- an agent can create an immutable valid primitive component revision and retrieve the same revision by exact digest.
 
-### M4 — Farm layout editing
-
-Deliver:
-
-- add/remove/move/configure component
-- connect/disconnect
-- layout validation
-- concurrency handling
-
-Exit criteria:
-
-- an agent can build the reference pilot layout using registry components
-
-### M5 — Assemblies
+### M3 — Farm binding mutation
 
 Deliver:
 
-- create/get/validate/instantiate assembly
+```text
+farms.set_component
+farms.validate_layout
+```
 
-Exit criteria:
+Use the existing farm version for compare-and-swap.
 
-- reusable DWC/aeration assemblies can be authored and placed through MCP
+Exit criterion:
 
-### M6 — Project import/export
+- an agent can migrate/build the reference pilot component bindings without creating duplicate domain identities.
 
-Deliver:
+### M4 — Pack installation/export
 
-- validate import
-- transactional import
-- standard/bundled export
+Only after browser/server registry persistence and archive v2 exist.
 
-### M7 — Optional community catalog integration
+### M5 — GLB/draft authoring
 
-Only after a component catalog exists.
+Only after model validation/storage exists. Use explicit GrowNerve draft IDs, never implicit MCP session state.
 
-MCP may search catalog metadata and request an explicit install through normal pack validation. It must not auto-install arbitrary Internet content without user intent and policy checks.
+### M6 — Physical command tools
+
+Optional and separate. Only add them if there is a concrete operator use case; they must call the existing command/safety path.
 
 ## Acceptance criteria
 
-The MCP design is successful when all of the following are true:
+The MCP integration is successful when:
 
-- an agent can create a component without generating Three.js code
-- the same candidate is accepted/rejected identically through UI/API/MCP validation paths
-- a primitive placeholder can later be replaced by a GLB through a new version without changing farm domain identity
-- farm edits remain valid after browser/server export/import
-- port incompatibilities are rejected before persistence
-- component versions are immutable and reproducible
-- no MCP operation can install executable plugin code in V0
-- no MCP layout operation bypasses farm concurrency rules
-- no MCP command path bypasses authorization/safety
+- no tool generates or edits Three.js source code.
+- tool and UI paths use the same component validator.
+- scene writes preserve existing `(entity_type, entity_id)` identity.
+- exact component revision/digest is persisted.
+- retries cannot silently create duplicate component revisions or scene entities.
+- farm writes obey existing compare-and-swap semantics.
+- current role authorization applies to every call.
+- no component metadata can grant additional privileges.
+- no pack can install executable code in V0.
+- browser-only archives remain usable without MCP.
+- an MCP client can create a primitive component and bind it to the pilot farm end-to-end.
 
-## Recommended first implementation
+## First proof to build
 
-Do not start by building a large MCP surface.
+Do not start with the large future tool catalog.
 
 The highest-value proof is:
 
 ```text
-components.schema
-components.search
+components.list
+components.get
 components.validate
 components.create
 farms.get_layout
-farms.add_component
+farms.set_component
 farms.validate_layout
 ```
 
-With primitive geometry, those tools are enough to prove that an AI can create and place a new component while GrowNerve remains renderer-agnostic and safe.
+That is enough to prove the core idea: an AI can add a new validated component to GrowNerve while the existing domain model, concurrency boundary, permissions, browser portability, and renderer architecture remain intact.
