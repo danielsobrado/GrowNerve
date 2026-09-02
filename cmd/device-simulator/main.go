@@ -33,6 +33,37 @@ var defaultChannels = []string{
 	"01990a20-6a00-7000-8000-000000000034",
 }
 
+type simulatedCommandResult struct {
+	result       string
+	reason       string
+	appliedValue any
+}
+
+type simulatedCommandReplay struct {
+	mu      sync.Mutex
+	results map[string]simulatedCommandResult
+}
+
+func newSimulatedCommandReplay() *simulatedCommandReplay {
+	return &simulatedCommandReplay{results: map[string]simulatedCommandResult{}}
+}
+
+func (replay *simulatedCommandReplay) apply(controller *edge.Controller, command deviceprotocol.Command, now time.Time) simulatedCommandResult {
+	replay.mu.Lock()
+	defer replay.mu.Unlock()
+	if result, found := replay.results[command.CommandID]; found {
+		return result
+	}
+	result := simulatedCommandResult{result: "applied", appliedValue: command.Value}
+	if err := controller.ApplyCommand(command, now); err != nil {
+		result.result = "rejected"
+		result.reason = rejectionCode(err)
+		result.appliedValue = nil
+	}
+	replay.results[command.CommandID] = result
+	return result
+}
+
 func main() {
 	if err := run(); err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, err)
@@ -56,7 +87,7 @@ func run() error {
 
 	bootID := uuid.NewString()
 	controller := edge.NewController(*deviceID)
-	var applied sync.Map
+	replay := newSimulatedCommandReplay()
 
 	options := paho.NewClientOptions().AddBroker(*broker).
 		SetClientID("grownerve-simulator-" + (*deviceID)[len(*deviceID)-8:]).SetAutoReconnect(true)
@@ -64,7 +95,7 @@ func run() error {
 		options.SetUsername(*username).SetPassword(*password)
 	}
 	options.SetOnConnectHandler(func(client paho.Client) {
-		subscribeCommands(client, controller, &applied)
+		subscribeCommands(client, controller, replay, *deviceID)
 		subscribeConfig(client, controller, *deviceID)
 	})
 
@@ -90,30 +121,21 @@ func run() error {
 	}
 }
 
-func subscribeCommands(client paho.Client, controller *edge.Controller, applied *sync.Map) {
-	client.Subscribe("grownerve/v1/devices/+/commands", 1, func(_ paho.Client, message paho.Message) {
+func subscribeCommands(client paho.Client, controller *edge.Controller, replay *simulatedCommandReplay, deviceID string) {
+	topic := fmt.Sprintf("grownerve/v1/devices/%s/commands", deviceID)
+	client.Subscribe(topic, 1, func(_ paho.Client, message paho.Message) {
 		var command deviceprotocol.Command
 		if json.Unmarshal(message.Payload(), &command) != nil {
 			return
 		}
-		parts := strings.Split(message.Topic(), "/")
-		targetDeviceID := parts[len(parts)-2]
 		now := time.Now().UTC()
-
-		result, reason := "applied", ""
-		// A duplicate is acknowledged as applied without acting twice: the
-		// server may legitimately retry a command it never saw acknowledged.
-		if _, seen := applied.LoadOrStore(command.CommandID, true); seen {
-			reason = "DUPLICATE_ALREADY_APPLIED"
-		} else if err := controller.ApplyCommand(command, now); err != nil {
-			result, reason = "rejected", rejectionCode(err)
-		}
+		result := replay.apply(controller, command, now)
 		ack := deviceprotocol.Acknowledgement{
-			ProtocolVersion: deviceprotocol.Version, CommandID: command.CommandID, DeviceID: targetDeviceID,
-			Result: result, ReasonCode: reason, AppliedValue: command.Value, AcknowledgedAt: now,
+			ProtocolVersion: deviceprotocol.Version, CommandID: command.CommandID, DeviceID: deviceID,
+			Result: result.result, ReasonCode: result.reason, AppliedValue: result.appliedValue, AcknowledgedAt: now,
 		}
 		payload, _ := json.Marshal(ack)
-		client.Publish(fmt.Sprintf("grownerve/v1/devices/%s/acks", targetDeviceID), 1, false, payload)
+		client.Publish(fmt.Sprintf("grownerve/v1/devices/%s/acks", deviceID), 1, false, payload)
 	})
 }
 
