@@ -1,7 +1,7 @@
 FROM node:22-alpine AS build
 WORKDIR /src
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN npm install --package-lock-only --ignore-scripts && npm ci
 COPY . .
 RUN npm run build
 
