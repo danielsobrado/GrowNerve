@@ -1,6 +1,6 @@
 # GrowNerve Documentation
 
-This directory is the implementation blueprint for GrowNerve. Documents are ordered so a new contributor can move from product intent to architecture, domain design, edge control, UI, safety, deployment, implementation status, and future extensibility without reverse-engineering assumptions from code.
+This directory is the implementation blueprint for GrowNerve. Documents are ordered so a new contributor can move from product intent to architecture, domain design, edge control, UI, safety, deployment, implementation status, future extensibility, and optional monetization without reverse-engineering assumptions from code.
 
 ## Reading order
 
@@ -30,6 +30,7 @@ This directory is the implementation blueprint for GrowNerve. Documents are orde
 24. [Component and plugin system](24-component-plugin-system.md)
 25. [MCP component authoring and farm editing](25-mcp-component-authoring.md)
 26. [Component taxonomy, capabilities, and information surfaces](26-component-taxonomy-and-capabilities.md)
+27. [Commerce catalog, compatibility, and referral service](27-commerce-catalog-and-referral-service.md)
 
 The ESP32 controller lives in [`firmware/esp32`](../firmware/esp32/README.md).
 
@@ -37,9 +38,11 @@ The ESP32 controller lives in [`firmware/esp32`](../firmware/esp32/README.md).
 
 `22-implementation-status.md` is authoritative for what the repository actually implements today.
 
-The component registry, third-party component packs, GLB pack storage/import, archive v2, ports/anchors, richer component taxonomy, and MCP server described in documents 24–26 are planned work. The current digital twin already works using procedural geometry and profile-based rendering; document 24 describes an incremental migration of that code rather than a parallel replacement application.
+The component registry, third-party component packs, GLB pack storage/import, archive v2, ports/anchors, richer component taxonomy, MCP server, and commerce/referral service described in documents 24–27 are planned work. The current digital twin already works using procedural geometry and profile-based rendering; document 24 describes an incremental migration of that code rather than a parallel replacement application.
 
 Document 26 is deliberately broader than the first implementation. It defines the target categories, subtypes, capability families, information surfaces, state vocabulary, physical ports/anchors, and component families so later additions remain coherent. Its implementation order explicitly keeps the first schema small and pilot-driven.
+
+Document 27 defines an optional monetization boundary. The farm/control runtime does not depend on it. Product catalogs, merchant APIs, affiliate credentials, referral tags, sponsorship metadata, regional offers, and click/conversion attribution belong in a separate commerce service with its own database and deployment.
 
 ## Runtime modes
 
@@ -51,6 +54,8 @@ browser mode  -> IndexedDB + local simulator/imported data
 ```
 
 Both expose the same product UI, entity identities, grow-management concepts, history views, alerts, and 3D twin. Browser mode is portable and static-hostable, but it is not considered a safe substitute for unattended physical automation.
+
+An optional commerce client may call the separate commerce service in either runtime. Disabling or losing that service removes only shopping/recommendation information and must never affect normal GrowNerve operation.
 
 ## Target extensibility model
 
@@ -89,7 +94,36 @@ Tags are discovery metadata only. They never grant behavior, permissions, or saf
 
 Component packs are declarative in V0 and do not execute arbitrary code. MCP is planned as another adapter over the same validated component/farm services rather than a filesystem editor or Three.js controller.
 
-See `24-component-plugin-system.md`, `25-mcp-component-authoring.md`, and `26-component-taxonomy-and-capabilities.md` before implementing extensible 3D assets or AI-assisted scene authoring.
+## Target commerce model
+
+Technical component truth and commercial offers are separate systems:
+
+```text
+component/domain requirement
+          |
+          v
+neutral compatibility mapping
+          |
+          v
+separate GrowNerve Commerce Service
+      /          |           \
+     v           v            v
+ products      offers      referrals
+```
+
+Important consequences:
+
+- technical component definitions contain no affiliate URLs, commission rates, sponsored rank, merchant credentials, or tracking code
+- merchant/API credentials and referral configuration never ship in the browser bundle or community component packs
+- recommendation compatibility is evaluated before commerce ranking
+- affiliate payout is not an input to organic compatibility/ranking
+- sponsored results are shown separately and clearly labeled
+- recommendations explain why a product is compatible or uncertain
+- the commerce service receives only minimal technical/market requirements rather than full farm data
+- merchant-specific rules determine whether GrowNerve returns a direct affiliate URL, permitted redirect, referral code, or ordinary non-affiliate link
+- commerce is optional and non-critical; the app remains fully useful when it is disabled/offline
+
+See `24-component-plugin-system.md`, `25-mcp-component-authoring.md`, `26-component-taxonomy-and-capabilities.md`, and `27-commerce-catalog-and-referral-service.md` before implementing extensible 3D assets, AI-assisted scene authoring, or commercial product recommendations.
 
 ## Non-negotiable constraints
 
@@ -114,8 +148,16 @@ See `24-component-plugin-system.md`, `25-mcp-component-authoring.md`, and `26-co
 - MCP authoring cannot bypass farm compare-and-swap concurrency, authorization, validation, audit, or physical safety rules.
 - Dangerous commands require server-side safety validation in full mode even when initiated from the 3D UI or future MCP tooling.
 - Browser-only mode must clearly identify simulated/non-authoritative control.
+- The commerce/referral service is outside the farm/control trust boundary and has no MQTT or farm-database credentials.
+- Core farm functionality never requires the commerce service.
+- Affiliate/referral credentials and commercial ranking configuration never ship in client code or component packs.
+- Affiliate payout cannot alter organic recommendation ordering.
+- Sponsored placements are explicit and cannot bypass technical compatibility gates.
+- Affiliate and sponsored relationships are disclosed clearly at the actionable recommendation/link surface.
+- Merchant link, redirect, price, content, and caching rules are enforced per program instead of assuming one universal affiliate policy.
+- Commerce requests use minimum necessary data and do not upload full `FarmData`, telemetry, observations, media, or command history.
 - Telemetry and meaningful farm events are separate data classes.
-- Domain services do not depend directly on HTTP, MQTT, SQL, MCP, or Three.js.
+- Domain services do not depend directly on HTTP, MQTT, SQL, MCP, commerce services, or Three.js.
 - Browser persistence uses IndexedDB, not `localStorage`.
 - Browser exports are versioned and validated before import.
 - Configuration belongs in YAML/environment configuration, not hidden constants in application code.
@@ -123,7 +165,7 @@ See `24-component-plugin-system.md`, `25-mcp-component-authoring.md`, and `26-co
 - Authorization and safety are separate checks; neither substitutes for the other.
 - Concurrent writes to farm state conflict rather than silently overwriting one another.
 - Measurement history is append-only and stored apart from the configuration document.
-- The system stays a modular monolith until actual scaling pressure demonstrates a need to split it.
+- The farm/control system stays a modular monolith until actual scaling pressure demonstrates a need to split it; the optional commerce service is a deliberate external commercial boundary rather than a decomposition of farm-control logic.
 
 ## Reference installation
 
