@@ -14,7 +14,7 @@
     "build": "tsc -b && vite build",
     "prebuild:browser": "npm run gen:api",
     "build:browser": "tsc -b && vite build --mode browser",
-    "deploy:pages": "npm run build:browser && node scripts/deploy-pages.mjs",
+    "deploy:pages": "node scripts/deploy-pages.mjs",
     "gen:api": "openapi-typescript ../api/openapi.yaml -o src/lib/api/generated/schema.d.ts",
     "pretypecheck": "npm run gen:api",
     "typecheck": "tsc -b --pretty false",
