@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"slices"
 	"strings"
@@ -16,8 +17,12 @@ import (
 const Version = 1
 
 const (
-	MaximumCommandLifetime = 5 * time.Minute
-	MaximumFutureClockSkew  = time.Minute
+	MaximumCommandLifetime    = 5 * time.Minute
+	MaximumFutureClockSkew     = time.Minute
+	MaximumTelemetrySequence   = uint64(1<<63 - 1)
+	MaximumTelemetrySamples    = 128
+	MaximumTelemetryBootID     = 128
+	MaximumTelemetryUnitLength = 32
 )
 
 type Quality string
@@ -54,21 +59,34 @@ func ParseTelemetry(payload []byte) (TelemetryEnvelope, error) {
 	if err := decoder.Decode(&envelope); err != nil {
 		return envelope, fmt.Errorf("decode telemetry: %w", err)
 	}
+	var extra any
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return envelope, errors.New("telemetry contains more than one JSON value")
+		}
+		return envelope, fmt.Errorf("decode telemetry trailer: %w", err)
+	}
 	if envelope.ProtocolVersion != Version {
 		return envelope, fmt.Errorf("unsupported protocol version %d", envelope.ProtocolVersion)
 	}
 	if _, err := uuid.Parse(envelope.DeviceID); err != nil {
 		return envelope, errors.New("deviceId must be a UUID")
 	}
-	if envelope.BootID == "" || envelope.ObservedAt.IsZero() || len(envelope.Samples) == 0 {
-		return envelope, errors.New("bootId, observedAt, and samples are required")
+	if envelope.BootID == "" || len(envelope.BootID) > MaximumTelemetryBootID || envelope.ObservedAt.IsZero() || len(envelope.Samples) == 0 {
+		return envelope, errors.New("bootId, observedAt, and samples are required and bounded")
+	}
+	if envelope.Sequence > MaximumTelemetrySequence {
+		return envelope, errors.New("telemetry sequence exceeds persistence range")
+	}
+	if len(envelope.Samples) > MaximumTelemetrySamples {
+		return envelope, errors.New("telemetry sample batch is too large")
 	}
 	qualities := []Quality{QualityGood, QualitySuspect, QualityStale, QualityCalibrating, QualityFault, QualityUnknown}
 	for _, sample := range envelope.Samples {
 		if _, err := uuid.Parse(sample.ChannelID); err != nil {
 			return envelope, errors.New("sample channelId must be a UUID")
 		}
-		if sample.Unit == "" || math.IsNaN(sample.Value) || math.IsInf(sample.Value, 0) {
+		if sample.Unit == "" || len(sample.Unit) > MaximumTelemetryUnitLength || math.IsNaN(sample.Value) || math.IsInf(sample.Value, 0) {
 			return envelope, errors.New("sample value and unit are invalid")
 		}
 		if !slices.Contains(qualities, sample.Quality) {
@@ -247,6 +265,9 @@ func (config EdgeConfig) Validate() error {
 	}
 	if strings.TrimSpace(config.ConfigVersion) == "" {
 		return errors.New("configVersion is required")
+	}
+	if len(config.ConfigVersion) > 64 {
+		return errors.New("configVersion is too long for controller persistence")
 	}
 	if config.IssuedAt.IsZero() {
 		return errors.New("issuedAt is required")
