@@ -132,6 +132,56 @@ func TestCommandValidationAndIdempotency(t *testing.T) {
 	}
 }
 
+func TestIdempotencyKeyCannotBeReusedForDifferentCommand(t *testing.T) {
+	store := NewMemoryStore()
+	_, _ = store.Save(context.Background(), json.RawMessage(commandStateJSON(true, 0, 100)), AnyVersion)
+	handler := NewHandler(store)
+
+	send := func(value int) *httptest.ResponseRecorder {
+		body := `{"targetChannelId":"01990a20-6a00-7000-8000-000000000001","value":` + json.Number(string(rune('0'+value))).String() + `,"reason":"test"}`
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/commands", strings.NewReader(body))
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Idempotency-Key", "stable-key")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		return response
+	}
+
+	first := send(5)
+	if first.Code != http.StatusAccepted {
+		t.Fatalf("first command = %d: %s", first.Code, first.Body.String())
+	}
+	second := send(6)
+	if second.Code != http.StatusConflict || !strings.Contains(second.Body.String(), "IDEMPOTENCY_KEY_REUSED") {
+		t.Fatalf("different command reused key = %d: %s", second.Code, second.Body.String())
+	}
+}
+
+func TestCommandParsingAcceptsJSONParametersAndRejectsTrailingData(t *testing.T) {
+	store := NewMemoryStore()
+	_, _ = store.Save(context.Background(), json.RawMessage(commandStateJSON(true, 0, 100)), AnyVersion)
+	handler := NewHandler(store)
+	body := `{"targetChannelId":"01990a20-6a00-7000-8000-000000000001","value":50,"reason":"test"}`
+
+	if response := makeRequest(handler, http.MethodPost, "/api/v1/commands", body, "application/json; charset=utf-8"); response.Code != http.StatusAccepted {
+		t.Fatalf("JSON with charset = %d: %s", response.Code, response.Body.String())
+	}
+	if response := makeRequest(handler, http.MethodPost, "/api/v1/commands", body+` {}`, "application/json"); response.Code != http.StatusBadRequest {
+		t.Fatalf("trailing JSON = %d: %s", response.Code, response.Body.String())
+	}
+}
+
+func TestCommandBodyLimitReturns413(t *testing.T) {
+	store := NewMemoryStore()
+	_, _ = store.Save(context.Background(), json.RawMessage(commandStateJSON(true, 0, 100)), AnyVersion)
+	handler := NewHandler(store)
+	body := `{"targetChannelId":"01990a20-6a00-7000-8000-000000000001","value":50,"reason":"` + strings.Repeat("x", 70<<10) + `"}`
+	response := makeRequest(handler, http.MethodPost, "/api/v1/commands", body, "application/json")
+	if response.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversized command = %d: %s", response.Code, response.Body.String())
+	}
+}
+
 func TestMemoryStoreCopiesState(t *testing.T) {
 	store := NewMemoryStore()
 	if _, _, err := store.Load(context.Background()); !errors.Is(err, ErrNotFound) {
