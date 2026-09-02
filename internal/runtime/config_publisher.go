@@ -12,6 +12,8 @@ import (
 	"github.com/jdanielsobrado/grownerve/internal/deviceprotocol"
 )
 
+const maximumPersistedConfigVersionLength = 64
+
 // ValidatingConfigPublisher prevents an invalid retained configuration from
 // reaching a controller. Device-side validation remains mandatory as a second
 // safety boundary.
@@ -38,6 +40,9 @@ func (publisher *ValidatingConfigPublisher) PublishConfig(ctx context.Context, d
 	}
 	if !strings.EqualFold(config.DeviceID, deviceID) {
 		return errors.New("edge config deviceId does not match publish target")
+	}
+	if len(config.ConfigVersion) > maximumPersistedConfigVersionLength {
+		return fmt.Errorf("edge config version exceeds %d bytes", maximumPersistedConfigVersionLength)
 	}
 	if err := config.Validate(); err != nil {
 		return fmt.Errorf("validate edge config: %w", err)
