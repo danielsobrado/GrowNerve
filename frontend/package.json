@@ -24,6 +24,7 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@drusniel/ptl-runtime": "git+https://github.com/danielsobrado/drusniel-procedural-textures.git#21c61d1651548bf4b196708a93d86c033607f403",
     "@fontsource/inter": "5.2.5",
     "@react-three/drei": "^10.7.6",
     "@react-three/fiber": "^9.3.0",
@@ -33,7 +34,7 @@
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "recharts": "^3.2.0",
-    "three": "^0.180.0",
+    "three": "0.185.1",
     "zod": "^4.1.5"
   },
   "devDependencies": {
@@ -44,7 +45,7 @@
     "@types/node": "^24.3.0",
     "@types/react": "^19.1.12",
     "@types/react-dom": "^19.1.9",
-    "@types/three": "^0.180.0",
+    "@types/three": "0.185.4",
     "@vitejs/plugin-react": "^5.0.2",
     "@vitest/coverage-v8": "^3.2.4",
     "eslint": "^9.35.0",
