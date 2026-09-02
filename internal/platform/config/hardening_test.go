@@ -22,8 +22,9 @@ func TestLoadRejectsMalformedEnvironmentOverrides(t *testing.T) {
 		variable string
 		value    string
 	}{
-		"retention":   {variable: "APP_TELEMETRY__RETENTION", value: "not-a-duration"},
-		"media bytes": {variable: "APP_MEDIA__MAXIMUM_BYTES", value: "many"},
+		"retention":    {variable: "APP_TELEMETRY__RETENTION", value: "not-a-duration"},
+		"media bytes":  {variable: "APP_MEDIA__MAXIMUM_BYTES", value: "many"},
+		"header bytes": {variable: "APP_SERVER__MAX_HEADER_BYTES", value: "many"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			directory := writeMinimalConfig(t)
@@ -66,15 +67,35 @@ func TestProductionOIDCIssuerRequiresHTTPS(t *testing.T) {
 	}
 }
 
-func TestLoadFillsTelemetryAndRuntimeDefaults(t *testing.T) {
+func TestLoadFillsTelemetryRuntimeAndHeaderDefaults(t *testing.T) {
 	config, err := Load(writeMinimalConfig(t))
 	if err != nil {
 		t.Fatal(err)
+	}
+	if config.Server.MaxHeaderBytes != defaultMaxHeaderBytes {
+		t.Fatalf("max header bytes = %d, want %d", config.Server.MaxHeaderBytes, defaultMaxHeaderBytes)
 	}
 	if config.Telemetry.BatchSize <= 0 || config.Telemetry.FlushInterval <= 0 {
 		t.Fatalf("telemetry defaults were not applied: %+v", config.Telemetry)
 	}
 	if config.Runtime.CommandSweepInterval <= 0 || config.Runtime.ConfigSyncInterval <= 0 || config.Runtime.DeviceOfflineAfter <= 0 {
 		t.Fatalf("runtime defaults were not applied: %+v", config.Runtime)
+	}
+}
+
+func TestHeaderLimitCanBeOverriddenWithinBound(t *testing.T) {
+	directory := writeMinimalConfig(t)
+	t.Setenv("APP_SERVER__MAX_HEADER_BYTES", "65536")
+	config, err := Load(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.Server.MaxHeaderBytes != 65536 {
+		t.Fatalf("max header bytes = %d", config.Server.MaxHeaderBytes)
+	}
+
+	config.Server.MaxHeaderBytes = maximumMaxHeaderBytes + 1
+	if err := config.Validate(); err == nil {
+		t.Fatal("oversized header limit was accepted")
 	}
 }
