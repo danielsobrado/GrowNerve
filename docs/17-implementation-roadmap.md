@@ -14,6 +14,8 @@ In particular, the selectable procedural digital twin already exists. The new JS
 
 The component track is labeled `6R` below to make that distinction explicit.
 
+The broad semantic catalog in `26-component-taxonomy-and-capabilities.md` is a direction/compatibility vocabulary, not a requirement to implement every category or capability in the first schema. Capabilities enter the executable contract only when GrowNerve has a real consumer, precise validation rules, and tests.
+
 ## Phase 0 — Repository and foundations
 
 Deliver:
@@ -180,19 +182,45 @@ The current implementation intentionally becomes the compatibility fixture for t
 
 ## Phase 6R1 — Component contract and compatibility registry
 
-See `24-component-plugin-system.md`.
+See `24-component-plugin-system.md` and `26-component-taxonomy-and-capabilities.md`.
 
 Deliver:
 
 - JSON Schema 2020-12 component/pack/component-ref contracts
 - `snake_case` JSON matching the existing portable format
 - stable component IDs with separate SemVer revisions and SHA-256 digest
+- category/subtype/tag fields with the governance rules in document 26
 - channel-slot model aligned with the existing `Channel` domain type
-- small capability vocabulary
+- deliberately small executable capability vocabulary
 - primitive model definitions matching current procedural geometry
 - built-in component revisions for every current `profile`
 - exact deterministic profile -> component-ref migration
+- standard tooltip/selection information rules for the pilot
+- action resolver inputs separated from component-supplied metadata
 - valid/invalid schema fixtures
+
+First executable taxonomy subset:
+
+```text
+structure/zone or grow_tent
+container/reservoir
+lighting/led_panel
+air/circulation_fan
+plant/lettuce
+```
+
+First executable capability subset:
+
+```text
+telemetry
+calibration
+switchable
+variable_output
+growth_stage
+harvestable
+```
+
+Do not add the rest of the documented taxonomy to code merely because it is listed in document 26.
 
 Exit criteria:
 
@@ -200,6 +228,8 @@ Exit criteria:
 - no second operational instance identity is introduced
 - current v1 scene data can be normalized without losing `(entity_type, entity_id)` identity
 - component conflicts are explicit rather than last-write-wins
+- category/tag metadata cannot create actions or change authorization/safety behavior
+- a capability is added only with a concrete product consumer and tests
 
 ## Phase 6R2 — Additive scene migration and generic primitive renderer
 
@@ -212,6 +242,8 @@ Deliver:
 - primitive geometry renderer
 - normalized render-state behaviors for dynamic state such as reservoir fill and fan rotation
 - capability/domain-driven radial action resolver replacing `profileActions`
+- progressive information surfaces: concise tooltip, selected-component summary, detailed inspector routing
+- mandatory freshness/quality presentation when live measurements are shown
 
 Exit criteria:
 
@@ -219,6 +251,7 @@ Exit criteria:
 - renderer selection no longer branches on pilot profiles such as `binding.profile === "fan"`
 - selecting an entity resolves the same UUID before and after migration
 - command/safety logic remains outside component definitions
+- stale/suspect/fault measurements cannot be visually mistaken for fresh good measurements
 
 ## Phase 6R3 — Registry persistence and portable archive v2
 
@@ -245,9 +278,10 @@ Deliver:
 
 - GLB inspection/validation/cache
 - pack ZIP import/export
-- local component browsing
+- local component browsing by category/subtype/capability/tag
 - imported component rendering through the same registry path as built-ins
 - configured model/texture/file budgets
+- generic versus vendor-specific definition metadata separation
 
 Do not add arbitrary JavaScript, WebAssembly, shaders, remote asset hot-links, or a required marketplace.
 
@@ -256,19 +290,23 @@ Exit criteria:
 - a user can import a valid third-party declarative component pack without code changes
 - invalid/malicious packs fail before installation
 - imported components work in both server and browser rendering modes
+- vendor/community metadata cannot grant permissions or privileged actions
 
 ## Phase 6R5 — Ports, anchors, connections, and lightweight placement
 
-Deliver only when a real layout-editing workflow needs them:
+Deliver only when a real layout-editing workflow needs them. Use the controlled vocabulary/governance in document 26.
 
-- physical topology ports
-- spatial anchors
+Potential deliverables:
+
+- physical topology ports for water/air/electrical connections actually needed by the pilot/next real setup
+- spatial anchors for tents, racks, shelves, reservoirs, probes, and mounts
 - explicit compatibility validation
 - connection persistence/visualization where useful
-- simple snap placement
+- simple snap placement that persists the resulting transform
+- rack/shelf containment summaries without duplicating child telemetry
 - assemblies where they remove real repeated work
 
-Do not build a general CAD editor.
+Do not build a general CAD/BIM/electrical/fluid ontology editor.
 
 ## Phase 6R6 — MCP component authoring proof
 
@@ -290,7 +328,7 @@ farms.validate_layout
 
 Deliver:
 
-- deterministic read-only registry/schema discovery
+- deterministic read-only registry/schema/taxonomy discovery
 - structured JSON Schema 2020-12 tool inputs/outputs
 - primitive immutable component creation
 - farm-layout binding mutation using the existing farm compare-and-swap version
@@ -303,7 +341,7 @@ Exit criteria:
 - the component can be bound to an existing pilot entity without creating a second identity
 - MCP and normal validation paths accept/reject the same fixtures
 - stale farm versions conflict rather than overwrite
-- no MCP operation bypasses authorization, component validation, or command safety
+- no MCP operation bypasses authorization, component validation, taxonomy/capability validation, or command safety
 
 ## Phase 7 — Low-risk control
 
@@ -400,6 +438,8 @@ Later work:
 - energy/water/nutrient efficiency
 - recommendations
 
+Component taxonomy additions for vision, derived/virtual values, energy, climate, maintenance, and other extended equipment should be introduced alongside the real features that consume them rather than pre-implemented as unused schema branches.
+
 ## Later extensibility work
 
 After local packs and MCP are proven against real use, consider:
@@ -409,6 +449,7 @@ After local packs and MCP are proven against real use, consider:
 - publisher tooling
 - richer MCP asset/draft workflows
 - richer assembly/editor ergonomics
+- additional taxonomy subtypes/capabilities driven by real installations
 
 None of these is required to validate the component architecture.
 
