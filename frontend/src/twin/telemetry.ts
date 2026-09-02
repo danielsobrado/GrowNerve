@@ -1,4 +1,4 @@
-import type { FarmData, Measurement, Quality } from "../domain/model";
+import type { EntityType, FarmData, Measurement, Quality } from "../domain/model";
 
 const UNIT_LABELS: Record<string, string> = {
   degC: "°C",
@@ -17,6 +17,12 @@ export interface TelemetryReading {
   stale: boolean;
 }
 
+export interface ReadingQuery {
+  now?: number;
+  entityType?: EntityType;
+  entityId?: string;
+}
+
 const formatNumber = (value: number) => Math.abs(value) >= 100 || Number.isInteger(value) ? value.toFixed(0) : value.toFixed(1);
 
 export const formatTelemetryValue = (value: number, unit?: string) => {
@@ -33,12 +39,14 @@ export function latestMeasurementsByChannel(data: FarmData): Map<string, Measure
   return latest;
 }
 
-export function readingByKey(data: FarmData, latest: Map<string, Measurement>, key: string, now = Date.now()): TelemetryReading | undefined {
-  const channel = data.channels.find((entry) => entry.key === key);
+export function readingByKey(data: FarmData, latest: Map<string, Measurement>, key: string, query: ReadingQuery = {}): TelemetryReading | undefined {
+  const channel = data.channels.find((entry) => entry.key === key
+    && (!query.entityType || entry.entity_type === query.entityType)
+    && (!query.entityId || entry.entity_id === query.entityId));
   if (!channel) return undefined;
   const measurement = latest.get(channel.id);
   if (!measurement) return undefined;
-  const ageMs = Math.max(0, now - new Date(measurement.observed_at).getTime());
+  const ageMs = Math.max(0, (query.now ?? Date.now()) - new Date(measurement.observed_at).getTime());
   return {
     key,
     label: channel.name,
@@ -51,6 +59,6 @@ export function readingByKey(data: FarmData, latest: Map<string, Measurement>, k
   };
 }
 
-export function latestReadingByKey(data: FarmData, key: string, now = Date.now()) {
-  return readingByKey(data, latestMeasurementsByChannel(data), key, now);
+export function latestReadingByKey(data: FarmData, key: string, query: ReadingQuery = {}) {
+  return readingByKey(data, latestMeasurementsByChannel(data), key, query);
 }
