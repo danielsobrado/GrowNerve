@@ -28,6 +28,7 @@ type Bridge struct {
 	logger    *slog.Logger
 	username  string
 	password  string
+	now       func() time.Time
 }
 
 type Option func(*Bridge)
@@ -44,8 +45,16 @@ func WithNotifier(notifier farm.Notifier) Option {
 	return func(bridge *Bridge) { bridge.notifier = notifier }
 }
 
+func WithClock(now func() time.Time) Option {
+	return func(bridge *Bridge) {
+		if now != nil {
+			bridge.now = now
+		}
+	}
+}
+
 func NewBridge(broker, clientID string, store farm.Store, logger *slog.Logger, options ...Option) *Bridge {
-	bridge := &Bridge{store: store, logger: logger}
+	bridge := &Bridge{store: store, logger: logger, now: func() time.Time { return time.Now().UTC() }}
 	for _, option := range options {
 		option(bridge)
 	}
@@ -97,7 +106,7 @@ func (bridge *Bridge) Start(ctx context.Context) {
 func (bridge *Bridge) Connected() bool { return bridge.client.IsConnected() }
 
 func (bridge *Bridge) PublishCommand(ctx context.Context, deviceID string, command deviceprotocol.Command) error {
-	if err := command.Validate(time.Now().UTC()); err != nil {
+	if err := command.Validate(bridge.now()); err != nil {
 		return err
 	}
 	payload, err := json.Marshal(command)
@@ -201,6 +210,20 @@ func channelOwnedBy(document *stateDocument, deviceID, channelID string) bool {
 	return false
 }
 
+func storedTime(value any) (time.Time, bool) {
+	switch typed := value.(type) {
+	case time.Time:
+		return typed.UTC(), !typed.IsZero()
+	case string:
+		for _, layout := range []string{time.RFC3339Nano, time.RFC3339} {
+			if parsed, err := time.Parse(layout, typed); err == nil {
+				return parsed.UTC(), true
+			}
+		}
+	}
+	return time.Time{}, false
+}
+
 func (bridge *Bridge) handleTelemetry(_ paho.Client, message paho.Message) {
 	topicDevice, validTopic := topicDeviceID(message.Topic(), "telemetry")
 	envelope, err := deviceprotocol.ParseTelemetry(message.Payload())
@@ -212,6 +235,11 @@ func (bridge *Bridge) handleTelemetry(_ paho.Client, message paho.Message) {
 		bridge.logger.Warn("mqtt_device_identity_mismatch", "topic", message.Topic(), "payload_device", envelope.DeviceID)
 		return
 	}
+	receivedAt := bridge.now()
+	if envelope.ObservedAt.After(receivedAt.Add(deviceprotocol.MaximumFutureClockSkew)) {
+		bridge.logger.Warn("mqtt_telemetry_future_timestamp", "device", topicDevice, "observed_at", envelope.ObservedAt, "received_at", receivedAt)
+		return
+	}
 
 	var accepted []telemetry.Measurement
 	var resolved []telemetry.Measurement
@@ -221,7 +249,8 @@ func (bridge *Bridge) handleTelemetry(_ paho.Client, message paho.Message) {
 			if device["id"] == topicDevice {
 				knownDevice = true
 				device["online"] = true
-				device["last_heartbeat"] = time.Now().UTC()
+				device["last_heartbeat"] = receivedAt
+				device["last_device_observed_at"] = envelope.ObservedAt
 				break
 			}
 		}
@@ -245,7 +274,7 @@ func (bridge *Bridge) handleTelemetry(_ paho.Client, message paho.Message) {
 			}
 			sequence := int64(envelope.Sequence)
 			resolved = append(resolved, telemetry.Measurement{
-				ChannelID: sample.ChannelID, ObservedAt: envelope.ObservedAt, ReceivedAt: time.Now().UTC(),
+				ChannelID: sample.ChannelID, ObservedAt: envelope.ObservedAt, ReceivedAt: receivedAt,
 				Sequence: &sequence, Value: sample.Value, Unit: sample.Unit,
 				Quality: telemetry.Quality(sample.Quality), SourceDeviceID: topicDevice,
 			})
@@ -275,6 +304,7 @@ func (bridge *Bridge) handleAcknowledgement(_ paho.Client, message paho.Message)
 		bridge.logger.Warn("mqtt_device_identity_mismatch", "topic", message.Topic(), "payload_device", ack.DeviceID)
 		return
 	}
+	receivedAt := bridge.now()
 	if err := bridge.mutate(func(document *stateDocument) error {
 		for _, command := range document.Commands {
 			if command["id"] != ack.CommandID {
@@ -287,6 +317,17 @@ func (bridge *Bridge) handleAcknowledgement(_ paho.Client, message paho.Message)
 			if status, _ := command["status"].(string); status == "applied" || status == "rejected" || status == "timed_out" || status == "cancelled" {
 				return errors.New("command_already_final")
 			}
+			expiresAt, valid := storedTime(command["expires_at"])
+			if !valid {
+				return errors.New("command_expiry_invalid")
+			}
+			command["acknowledged_at"] = ack.AcknowledgedAt
+			command["updated_at"] = receivedAt
+			if !expiresAt.After(receivedAt) {
+				command["status"] = "timed_out"
+				command["reason_code"] = "COMMAND_EXPIRED"
+				return nil
+			}
 			switch ack.Result {
 			case "applied":
 				command["status"] = "applied"
@@ -296,7 +337,6 @@ func (bridge *Bridge) handleAcknowledgement(_ paho.Client, message paho.Message)
 				command["status"] = "rejected"
 			}
 			command["reason_code"] = ack.ReasonCode
-			command["updated_at"] = ack.AcknowledgedAt
 			return nil
 		}
 		return errors.New("unknown_command")
@@ -317,11 +357,17 @@ func (bridge *Bridge) handleHealth(_ paho.Client, message paho.Message) {
 		bridge.logger.Warn("mqtt_device_identity_mismatch", "topic", message.Topic(), "payload_device", deviceID)
 		return
 	}
+	receivedAt := bridge.now()
+	if health.ObservedAt.After(receivedAt.Add(deviceprotocol.MaximumFutureClockSkew)) {
+		bridge.logger.Warn("mqtt_health_future_timestamp", "device", topicDevice, "observed_at", health.ObservedAt, "received_at", receivedAt)
+		return
+	}
 	if err := bridge.mutate(func(document *stateDocument) error {
 		for _, device := range document.Devices {
 			if device["id"] == topicDevice {
 				device["online"] = true
-				device["last_heartbeat"] = health.ObservedAt
+				device["last_heartbeat"] = receivedAt
+				device["last_device_observed_at"] = health.ObservedAt
 				device["firmware_version"] = health.FirmwareVersion
 				device["active_config_version"] = health.ActiveConfigVersion
 				return nil
@@ -344,13 +390,21 @@ func (bridge *Bridge) handleConfigAcknowledgement(_ paho.Client, message paho.Me
 		bridge.logger.Warn("mqtt_device_identity_mismatch", "topic", message.Topic(), "payload_device", ack.DeviceID)
 		return
 	}
+	receivedAt := bridge.now()
 	if err := bridge.mutate(func(document *stateDocument) error {
 		for _, device := range document.Devices {
 			if device["id"] == topicDevice {
+				desiredVersion, _ := device["desired_config_version"].(string)
+				if desiredVersion != "" && ack.ConfigVersion != desiredVersion {
+					return errors.New("stale_config_ack")
+				}
 				if ack.Accepted {
 					device["active_config_version"] = ack.ConfigVersion
 				}
-				device["last_config_result"] = map[string]any{"version": ack.ConfigVersion, "accepted": ack.Accepted, "detail": ack.Detail}
+				device["last_config_result"] = map[string]any{
+					"version": ack.ConfigVersion, "accepted": ack.Accepted, "detail": ack.Detail,
+					"acknowledged_at": ack.AcknowledgedAt, "received_at": receivedAt,
+				}
 				return nil
 			}
 		}
