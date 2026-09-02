@@ -15,10 +15,10 @@ import (
 )
 
 const (
-	testDevice    = "01990a20-6a00-7000-8000-000000000001"
-	testChannel   = "01990a20-6a00-7000-8000-000000000002"
-	testCommand   = "01990a20-6a00-7000-8000-000000000003"
-	foreignDevice = "01990a20-6a00-7000-8000-000000000011"
+	testDevice     = "01990a20-6a00-7000-8000-000000000001"
+	testChannel    = "01990a20-6a00-7000-8000-000000000002"
+	testCommand    = "01990a20-6a00-7000-8000-000000000003"
+	foreignDevice  = "01990a20-6a00-7000-8000-000000000011"
 	foreignChannel = "01990a20-6a00-7000-8000-000000000012"
 )
 
@@ -48,9 +48,9 @@ func deviceTopic(deviceID, suffix string) string {
 }
 
 func TestBridgeIngestsTelemetryHealthAndAcknowledgements(t *testing.T) {
-	state := `{"devices":[{"id":"` + testDevice + `","online":false}],"channels":[{"id":"` + testChannel + `","device_id":"` + testDevice + `","unit":"degC"}],"measurements":[],"commands":[{"id":"` + testCommand + `","target_channel_id":"` + testChannel + `","status":"published"}]}`
-	bridge, store, samples := testBridge(state)
 	now := time.Now().UTC()
+	state := `{"devices":[{"id":"` + testDevice + `","online":false}],"channels":[{"id":"` + testChannel + `","device_id":"` + testDevice + `","unit":"degC"}],"measurements":[],"commands":[{"id":"` + testCommand + `","target_channel_id":"` + testChannel + `","status":"published","expires_at":"` + now.Add(time.Minute).Format(time.RFC3339Nano) + `"}]}`
+	bridge, store, samples := testBridge(state)
 
 	telemetryPayload, _ := json.Marshal(deviceprotocol.TelemetryEnvelope{
 		ProtocolVersion: 1,
@@ -68,11 +68,11 @@ func TestBridgeIngestsTelemetryHealthAndAcknowledgements(t *testing.T) {
 	bridge.handleTelemetry(nil, message{topic: deviceTopic(testDevice, "telemetry"), payload: telemetryPayload})
 
 	health, _ := json.Marshal(deviceprotocol.Health{
-		ProtocolVersion: 1,
-		DeviceID:        testDevice,
-		FirmwareVersion: "v1",
+		ProtocolVersion:     1,
+		DeviceID:            testDevice,
+		FirmwareVersion:     "v1",
 		ActiveConfigVersion: "c1",
-		ObservedAt:      now,
+		ObservedAt:          now,
 	})
 	bridge.handleHealth(nil, message{topic: deviceTopic(testDevice, "health"), payload: health})
 
