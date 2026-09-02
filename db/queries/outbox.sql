@@ -1,6 +1,8 @@
 -- name: EnqueueOutboxMessage :one
 INSERT INTO outbox_messages (topic, message_key, payload)
 VALUES (sqlc.arg(topic), sqlc.arg(message_key), sqlc.arg(payload))
+ON CONFLICT (topic, message_key) DO UPDATE
+SET payload = outbox_messages.payload
 RETURNING id;
 
 -- name: ListPendingOutboxMessages :many
