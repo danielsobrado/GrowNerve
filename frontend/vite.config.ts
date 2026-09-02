@@ -9,7 +9,16 @@ export default defineConfig(({ mode }) => {
     base: env.VITE_BASE_PATH || (browser ? "/GrowNerve/" : "/"),
     plugins: [react(), VitePWA({
       registerType: "autoUpdate",
-      manifest: { name: "GrowNerve", short_name: "GrowNerve", description: "Local-first indoor farm intelligence", theme_color: "#18211b", background_color: "#f7f7f2", display: "standalone", start_url: ".", icons: [] },
+      manifest: {
+        name: "GrowNerve",
+        short_name: "GrowNerve",
+        description: "Local-first indoor farm intelligence",
+        theme_color: "#0d130f",
+        background_color: "#080c09",
+        display: "standalone",
+        start_url: ".",
+        icons: [{ src: "grownerve-mark.svg", sizes: "any", type: "image/svg+xml", purpose: "any maskable" }],
+      },
       workbox: { globPatterns: ["**/*.{js,css,html,svg,png,woff2,glb}"] },
       devOptions: { enabled: browser },
     })],
