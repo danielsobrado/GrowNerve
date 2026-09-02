@@ -15,6 +15,11 @@ import (
 
 const Version = 1
 
+const (
+	MaximumCommandLifetime = 5 * time.Minute
+	MaximumFutureClockSkew  = time.Minute
+)
+
 type Quality string
 
 const (
@@ -96,11 +101,20 @@ func (command Command) Validate(now time.Time) error {
 	if command.Type != "set_percent" && command.Type != "set_boolean" {
 		return errors.New("unsupported command type")
 	}
-	if command.IssuedAt.IsZero() || !command.ExpiresAt.After(now) {
-		return errors.New("command is expired or missing time")
+	if command.IssuedAt.IsZero() || command.ExpiresAt.IsZero() || !command.ExpiresAt.After(command.IssuedAt) {
+		return errors.New("command has invalid time bounds")
 	}
-	if command.IssuedAt.After(now.Add(time.Minute)) {
+	if command.ExpiresAt.Sub(command.IssuedAt) > MaximumCommandLifetime {
+		return errors.New("command lifetime exceeds maximum")
+	}
+	if !command.ExpiresAt.After(now) {
+		return errors.New("command is expired")
+	}
+	if command.IssuedAt.After(now.Add(MaximumFutureClockSkew)) {
 		return errors.New("command issuedAt is too far in the future")
+	}
+	if command.IssuedAt.Before(now.Add(-MaximumCommandLifetime)) {
+		return errors.New("command is stale")
 	}
 	return nil
 }
