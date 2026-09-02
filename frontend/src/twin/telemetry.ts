@@ -33,10 +33,10 @@ export function latestMeasurementsByChannel(data: FarmData): Map<string, Measure
   return latest;
 }
 
-export function latestReadingByKey(data: FarmData, key: string, now = Date.now()): TelemetryReading | undefined {
+export function readingByKey(data: FarmData, latest: Map<string, Measurement>, key: string, now = Date.now()): TelemetryReading | undefined {
   const channel = data.channels.find((entry) => entry.key === key);
   if (!channel) return undefined;
-  const measurement = latestMeasurementsByChannel(data).get(channel.id);
+  const measurement = latest.get(channel.id);
   if (!measurement) return undefined;
   const ageMs = Math.max(0, now - new Date(measurement.observed_at).getTime());
   return {
@@ -49,4 +49,8 @@ export function latestReadingByKey(data: FarmData, key: string, now = Date.now()
     quality: measurement.quality,
     stale: ageMs > channel.stale_after_seconds * 1000 || measurement.quality === "stale",
   };
+}
+
+export function latestReadingByKey(data: FarmData, key: string, now = Date.now()) {
+  return readingByKey(data, latestMeasurementsByChannel(data), key, now);
 }
