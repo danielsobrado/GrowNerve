@@ -4,14 +4,17 @@ import {
   AlertTriangle, Camera, CircleEllipsis, ClipboardPlus, Droplets, Eye, FlaskConical,
   Gauge, History, Plus, Power, Scissors, Settings, SlidersHorizontal, Wrench,
 } from "lucide-react";
-import { useRef, useState, type ComponentType } from "react";
+import { useMemo, useRef, useState, type ComponentType } from "react";
 import { WebGLRenderer, type Group, type WebGLRendererParameters } from "three";
 import type { EntityType, FarmData, SceneEntity } from "../domain/model";
 import { actionsForProfile, entityKey } from "./sceneState";
+import { latestMeasurementsByChannel, readingByKey } from "./telemetry";
+import { TwinHud } from "./TwinHud";
 
 export interface Selection { type: EntityType; id: string }
 
 type ActionIcon = ComponentType<{ size?: number; strokeWidth?: number }>;
+type LatestMeasurements = ReturnType<typeof latestMeasurementsByChannel>;
 
 function actionIcon(action: string): ActionIcon {
   switch (action) {
@@ -33,7 +36,12 @@ function actionIcon(action: string): ActionIcon {
   }
 }
 
-function tooltipFor(data: FarmData, binding: SceneEntity): { title: string; detail: string } {
+const readingSummary = (data: FarmData, latest: LatestMeasurements, key: string) => {
+  const reading = readingByKey(data, latest, key);
+  return reading ? `${reading.displayValue}${reading.stale ? " · stale" : ""}` : undefined;
+};
+
+function tooltipFor(data: FarmData, latest: LatestMeasurements, binding: SceneEntity): { title: string; detail: string } {
   if (binding.entity_type === "device") {
     const device = data.devices.find((entry) => entry.id === binding.entity_id);
     if (device) {
@@ -45,7 +53,11 @@ function tooltipFor(data: FarmData, binding: SceneEntity): { title: string; deta
 
   if (binding.entity_type === "reservoir") {
     const reservoir = data.reservoirs.find((entry) => entry.id === binding.entity_id);
-    if (reservoir) return { title: reservoir.name, detail: `${Math.round(reservoir.level_percent)}% level · ${reservoir.working_volume_l} L` };
+    if (reservoir) {
+      const temperature = readingSummary(data, latest, "water.temperature");
+      const level = readingSummary(data, latest, "water.level") ?? `${Math.round(reservoir.level_percent)}% level`;
+      return { title: reservoir.name, detail: [temperature, level].filter(Boolean).join(" · ") };
+    }
   }
 
   if (binding.entity_type === "plant_position") {
@@ -56,8 +68,11 @@ function tooltipFor(data: FarmData, binding: SceneEntity): { title: string; deta
   if (binding.entity_type === "zone") {
     const zone = data.zones.find((entry) => entry.id === binding.entity_id);
     if (zone) {
+      const temperature = readingSummary(data, latest, "air.temperature");
+      const humidity = readingSummary(data, latest, "air.humidity");
+      const telemetry = [temperature, humidity].filter(Boolean).join(" · ");
       const positions = data.plant_positions.filter((entry) => entry.zone_id === zone.id).length;
-      return { title: zone.name, detail: `${zone.type} · ${positions} plant positions` };
+      return { title: zone.name, detail: telemetry || `${zone.type} · ${positions} plant positions` };
     }
   }
 
@@ -83,7 +98,7 @@ function Plant({ attention }: { attention: boolean }) {
   return <group><mesh position={[0, -0.35, 0]}><cylinderGeometry args={[0.28, 0.34, 0.25, 20]} /><meshStandardMaterial color="#303833" /></mesh>{[-0.25, 0, 0.25].map((offset, index) => <mesh key={offset} position={[offset, 0.02 + index * 0.08, 0]} rotation={[0.2, offset * 2, offset]}><sphereGeometry args={[0.32, 20, 12]} /><meshStandardMaterial color={attention ? "#d9a441" : index === 1 ? "#5b9a62" : "#70b870"} roughness={0.8} /></mesh>)}</group>;
 }
 
-function Scene({ data, selection, onSelect }: { data: FarmData; selection?: Selection; onSelect: (selection: Selection) => void }) {
+function Scene({ data, latest, selection, onSelect }: { data: FarmData; latest: LatestMeasurements; selection?: Selection; onSelect: (selection: Selection) => void }) {
   const layout = data.scene_layouts[0];
   if (!layout) return null;
   const device = (binding: SceneEntity) => data.devices.find((entry) => entry.id === binding.entity_id);
@@ -95,10 +110,11 @@ function Scene({ data, selection, onSelect }: { data: FarmData; selection?: Sele
     <gridHelper args={[12, 24, "#294235", "#16221b"]} />
     {layout.entities.map((binding) => {
       const key = entityKey(binding.entity_type, binding.entity_id), selected = selection && entityKey(selection.type, selection.id) === key;
-      const equipment = device(binding), tooltip = tooltipFor(data, binding);
+      const equipment = device(binding), tooltip = tooltipFor(data, latest, binding);
+      const reservoir = binding.entity_type === "reservoir" ? data.reservoirs.find((entry) => entry.id === binding.entity_id) : undefined;
       return <Selectable key={key} binding={binding} selected={Boolean(selected)} onSelect={onSelect} title={tooltip.title} detail={tooltip.detail}>
         {binding.profile === "zone" && <mesh><boxGeometry args={[1, 1, 1]} /><meshStandardMaterial color="#264737" transparent opacity={0.12} wireframe /></mesh>}
-        {binding.profile === "reservoir" && <group><mesh><boxGeometry args={[1, 1, 1]} /><meshStandardMaterial color="#52625b" roughness={0.85} /></mesh><mesh position={[0, data.reservoirs[0].level_percent / 100 - 0.5, 0]} scale={[0.94, 0.04, 0.94]}><boxGeometry args={[1, 1, 1]} /><meshStandardMaterial color="#4bb2c9" transparent opacity={0.76} /></mesh></group>}
+        {binding.profile === "reservoir" && <group><mesh><boxGeometry args={[1, 1, 1]} /><meshStandardMaterial color="#52625b" roughness={0.85} /></mesh><mesh position={[0, (reservoir?.level_percent ?? 0) / 100 - 0.5, 0]} scale={[0.94, 0.04, 0.94]}><boxGeometry args={[1, 1, 1]} /><meshStandardMaterial color="#4bb2c9" transparent opacity={0.76} /></mesh></group>}
         {binding.profile === "light" && <mesh><boxGeometry args={[1, 1, 1]} /><meshStandardMaterial color={equipment?.state ? "#f3d36a" : "#50534f"} emissive={equipment?.state ? "#ffe58a" : "#000000"} emissiveIntensity={equipment?.state ? 1.2 : 0} /></mesh>}
         {binding.profile === "fan" && <Fan running={Boolean(equipment?.state)} />}
         {binding.profile === "plant" && <Plant attention={data.plant_positions.find((entry) => entry.id === binding.entity_id)?.health === "attention"} />}
@@ -110,7 +126,9 @@ function Scene({ data, selection, onSelect }: { data: FarmData; selection?: Sele
 
 export function DigitalTwin({ data, selection, onSelect, onAction }: { data: FarmData; selection?: Selection; onSelect: (selection: Selection) => void; onAction: (action: string) => void }) {
   const [renderer, setRenderer] = useState<"starting" | "webgpu" | "webgl">("starting");
+  const latest = useMemo(() => latestMeasurementsByChannel(data), [data]);
   const selectedBinding = selection && data.scene_layouts[0]?.entities.find((entry) => entry.entity_type === selection.type && entry.entity_id === selection.id);
+  const selectedTooltip = selectedBinding ? tooltipFor(data, latest, selectedBinding) : undefined;
   const createRenderer = async (options: WebGLRendererParameters) => {
     if (typeof navigator !== "undefined" && "gpu" in navigator) {
       try {
@@ -127,10 +145,15 @@ export function DigitalTwin({ data, selection, onSelect, onAction }: { data: Far
     return new WebGLRenderer({ ...options, antialias: true });
   };
   return <div className="gn-twin-wrap">
-    <Canvas gl={createRenderer} camera={{ position: data.scene_layouts[0]?.camera_position ?? [7, 6, 8], fov: 42 }} dpr={[1, 1.75]} onPointerMissed={() => onSelect({ type: "facility", id: data.facilities[0].id })}>
-      <Scene data={data} selection={selection} onSelect={onSelect} />
+    <Canvas gl={createRenderer} camera={{ position: data.scene_layouts[0]?.camera_position ?? [7, 6, 8], fov: 42 }} dpr={[1, 1.75]}>
+      <Scene data={data} latest={latest} selection={selection} onSelect={onSelect} />
     </Canvas>
     <div className="gn-renderer-badge"><span />{renderer === "webgpu" ? "WebGPU renderer" : renderer === "webgl" ? "WebGL fallback" : "Starting renderer"}</div>
-    {selectedBinding && <div className="gn-radial" aria-label="Entity actions">{actionsForProfile(selectedBinding.profile).slice(0, 5).map((action) => { const Icon = actionIcon(action); return <button key={action} title={action} aria-label={action} onClick={() => onAction(action)}><Icon size={15} strokeWidth={1.8} /><span>{action}</span></button>; })}</div>}
+    <TwinHud data={data} />
+    <div className="gn-scene-help">Drag to orbit · Scroll to zoom · Click an object to inspect</div>
+    {selectedBinding && selectedTooltip && <div className="gn-context-panel">
+      <div className="gn-context-target"><span>Selected</span><strong>{selectedTooltip.title}</strong><small>{selectedTooltip.detail}</small></div>
+      <div className="gn-radial" aria-label={`${selectedTooltip.title} actions`}>{actionsForProfile(selectedBinding.profile).slice(0, 5).map((action) => { const Icon = actionIcon(action); return <button key={action} title={action} aria-label={action} onClick={() => onAction(action)}><Icon size={15} strokeWidth={1.8} /><span>{action}</span></button>; })}</div>
+    </div>}
   </div>;
 }
