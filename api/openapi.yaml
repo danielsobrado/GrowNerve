@@ -233,6 +233,7 @@ paths:
       parameters:
         - in: header
           name: Idempotency-Key
+          description: Retry key bound to one normalized command request. Reusing it for different content returns 409.
           required: true
           schema: { type: string, minLength: 8, maxLength: 128 }
       requestBody:
@@ -247,17 +248,27 @@ paths:
                 targetChannelId: { type: string, format: uuid }
                 value: { oneOf: [{ type: number }, { type: boolean }] }
                 reason: { type: string, minLength: 1 }
-                expiresAt: { type: string, format: date-time }
+                expiresAt:
+                  description: Optional absolute expiry. Command lifetime is capped at five minutes.
+                  type: string
+                  format: date-time
       responses:
         "202": { description: Command persisted and accepted for delivery, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
-        "200": { description: A retry of an already-accepted command; the original record is returned, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+        "200": { description: An idempotent retry of an already-recorded command; the original record is returned., content: { application/json: { schema: { type: object, additionalProperties: true } } } }
         "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
-        "409": { $ref: "#/components/responses/Problem" }
-        "422": { description: The command was refused by a safety interlock. Authorization and safety are separate checks., content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "409": { description: Idempotency-Key was previously used for different command content., content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "413": { $ref: "#/components/responses/Problem" }
+        "415": { $ref: "#/components/responses/Problem" }
+        "422":
+          description: The request was recorded but rejected by a command safety rule. Authorization and safety are separate checks.
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
         "429": { $ref: "#/components/responses/Problem" }
+        "500": { $ref: "#/components/responses/Problem" }
 components:
   schemas:
     Health:
