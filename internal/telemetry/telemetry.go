@@ -6,6 +6,7 @@ package telemetry
 import (
 	"context"
 	"errors"
+	"math"
 	"time"
 )
 
@@ -52,6 +53,10 @@ func (measurement Measurement) Validate() error {
 		return errors.New("measurement needs a channel")
 	case measurement.ObservedAt.IsZero():
 		return errors.New("measurement needs an observation time")
+	case measurement.Sequence != nil && *measurement.Sequence < 0:
+		return errors.New("measurement sequence cannot be negative")
+	case math.IsNaN(measurement.Value) || math.IsInf(measurement.Value, 0):
+		return errors.New("measurement value must be finite")
 	case measurement.Unit == "":
 		return errors.New("measurement needs a unit")
 	case !measurement.Quality.Valid():
