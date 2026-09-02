@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
-	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -16,19 +15,20 @@ import (
 	"github.com/jdanielsobrado/grownerve/internal/platform/database/gen"
 )
 
+const (
+	queueDepth           = 512
+	auditWriteTimeout    = 5 * time.Second
+	shutdownDrainTimeout = 5 * time.Second
+)
+
 // Recorder writes audit entries to PostgreSQL through a bounded queue, so a slow
 // database cannot add latency to an operator's command.
 type Recorder struct {
 	queries *gen.Queries
 	logger  *slog.Logger
 	entries chan farm.AuditEntry
-	closed  sync.Once
 	done    chan struct{}
 }
-
-// queueDepth bounds how many entries may wait. If the queue fills, entries are
-// dropped with a warning rather than blocking the request that produced them.
-const queueDepth = 512
 
 func NewRecorder(pool *pgxpool.Pool, logger *slog.Logger) *Recorder {
 	return &Recorder{
@@ -44,21 +44,31 @@ func (recorder *Recorder) Start(ctx context.Context) {
 		for {
 			select {
 			case <-ctx.Done():
-				// Drain whatever is already queued so a clean shutdown does not
-				// lose entries that were accepted.
-				for {
-					select {
-					case entry := <-recorder.entries:
-						recorder.write(context.WithoutCancel(ctx), entry)
-					default:
-						return
-					}
-				}
+				recorder.drainOnShutdown()
+				return
 			case entry := <-recorder.entries:
 				recorder.write(ctx, entry)
 			}
 		}
 	}()
+}
+
+func (recorder *Recorder) drainOnShutdown() {
+	ctx, cancel := context.WithTimeout(context.Background(), shutdownDrainTimeout)
+	defer cancel()
+	for {
+		select {
+		case <-ctx.Done():
+			if pending := len(recorder.entries); pending > 0 {
+				recorder.logger.Error("audit_shutdown_incomplete", "pending", pending)
+			}
+			return
+		case entry := <-recorder.entries:
+			recorder.write(ctx, entry)
+		default:
+			return
+		}
+	}
 }
 
 // Wait blocks until the drain loop has finished.
@@ -75,10 +85,13 @@ func (recorder *Recorder) Record(_ context.Context, entry farm.AuditEntry) {
 	}
 }
 
-func (recorder *Recorder) write(ctx context.Context, entry farm.AuditEntry) {
-	detail := entry.Detail
-	if detail == nil {
-		detail = map[string]any{}
+func (recorder *Recorder) write(parent context.Context, entry farm.AuditEntry) {
+	ctx, cancel := context.WithTimeout(parent, auditWriteTimeout)
+	defer cancel()
+
+	detail := make(map[string]any, len(entry.Detail)+1)
+	for key, value := range entry.Detail {
+		detail[key] = value
 	}
 	// The actor is recorded as a label rather than a foreign key: identities can
 	// come from an external provider that has no row in the users table, and
@@ -86,7 +99,8 @@ func (recorder *Recorder) write(ctx context.Context, entry farm.AuditEntry) {
 	detail["actor"] = entry.Actor
 	encoded, err := json.Marshal(detail)
 	if err != nil {
-		encoded = []byte("{}")
+		recorder.logger.Error("audit_detail_invalid", "error", err, "action", entry.Action, "target", entry.TargetID)
+		encoded, _ = json.Marshal(map[string]any{"actor": entry.Actor})
 	}
 	params := gen.InsertAuditEntryParams{
 		Action:     entry.Action,
