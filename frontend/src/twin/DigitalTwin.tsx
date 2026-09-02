@@ -7,7 +7,7 @@ import {
 import { useCallback, useMemo, useRef, useState, type ComponentType } from "react";
 import { WebGLRenderer, type Group, type WebGLRendererParameters } from "three";
 import type { EntityType, FarmData, SceneEntity } from "../domain/model";
-import { AbsHousing, ProceduralFloor, ReservoirBody, TentShell } from "./materials/ProceduralPrimitives";
+import { AbsHousing, LedFixture, ProceduralFloor, ReservoirBody, TentShell } from "./materials/ProceduralPrimitives";
 import { actionsForProfile, entityKey } from "./sceneState";
 import { latestMeasurementsByChannel, readingByKey } from "./telemetry";
 import { TwinHud } from "./TwinHud";
@@ -117,7 +117,7 @@ function Scene({ data, latest, selection, onSelect }: { data: FarmData; latest: 
       return <Selectable key={key} binding={binding} selected={Boolean(selected)} onSelect={onSelect} title={tooltip.title} detail={tooltip.detail}>
         {binding.profile === "zone" && <group><TentShell /><mesh><boxGeometry args={[1, 1, 1]} /><meshStandardMaterial color="#41614b" transparent opacity={0.16} wireframe /></mesh></group>}
         {binding.profile === "reservoir" && <group><ReservoirBody /><mesh position={[0, (reservoir?.level_percent ?? 0) / 100 - 0.5, 0]} scale={[0.94, 0.04, 0.94]}><boxGeometry args={[1, 1, 1]} /><meshStandardMaterial color="#4bb2c9" transparent opacity={0.76} roughness={0.18} /></mesh></group>}
-        {binding.profile === "light" && <mesh castShadow><boxGeometry args={[1, 1, 1]} /><meshStandardMaterial color={equipment?.state ? "#f3d36a" : "#50534f"} emissive={equipment?.state ? "#ffe58a" : "#000000"} emissiveIntensity={equipment?.state ? 1.2 : 0} roughness={0.38} /></mesh>}
+        {binding.profile === "light" && <LedFixture running={Boolean(equipment?.state)} />}
         {binding.profile === "fan" && <Fan running={Boolean(equipment?.state)} />}
         {binding.profile === "plant" && <Plant attention={data.plant_positions.find((entry) => entry.id === binding.entity_id)?.health === "attention"} />}
       </Selectable>;
