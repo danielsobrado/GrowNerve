@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -65,7 +66,7 @@ func TestValidatingConfigPublisherForwardsOnlyValidConfig(t *testing.T) {
 }
 
 func TestValidatingConfigPublisherRejectsUnsafeOrMisdirectedConfig(t *testing.T) {
-	for name, deviceID, payload := range map[string]struct {
+	for name, testCase := range map[string]struct {
 		deviceID string
 		payload  []byte
 	}{
@@ -85,11 +86,17 @@ func TestValidatingConfigPublisherRejectsUnsafeOrMisdirectedConfig(t *testing.T)
 				config.Config.SafeOutputs[publisherChannelID] = 101
 			}),
 		},
+		"version too long": {
+			deviceID: publisherDeviceID,
+			payload: edgeConfigPayload(t, func(config *deviceprotocol.EdgeConfig) {
+				config.ConfigVersion = strings.Repeat("v", maximumPersistedConfigVersionLength+1)
+			}),
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			next := &capturedConfigPublisher{}
 			publisher := NewValidatingConfigPublisher(next)
-			if err := publisher.PublishConfig(context.Background(), deviceID, payload); err == nil {
+			if err := publisher.PublishConfig(context.Background(), testCase.deviceID, testCase.payload); err == nil {
 				t.Fatal("invalid configuration was published")
 			}
 			if next.calls != 0 {
