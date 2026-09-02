@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"math/big"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -43,8 +44,14 @@ func (*OIDCAuthenticator) Mode() string { return "oidc" }
 const minimumRefreshInterval = 30 * time.Second
 
 func NewOIDCAuthenticator(config OIDCConfig, client *http.Client) (*OIDCAuthenticator, error) {
-	if strings.TrimSpace(config.Issuer) == "" {
+	config.Issuer = strings.TrimSpace(config.Issuer)
+	if config.Issuer == "" {
 		return nil, errors.New("oidc issuer is required")
+	}
+	issuer, err := url.Parse(config.Issuer)
+	if err != nil || issuer.Host == "" || (issuer.Scheme != "http" && issuer.Scheme != "https") ||
+		issuer.User != nil || issuer.RawQuery != "" || issuer.Fragment != "" {
+		return nil, errors.New("oidc issuer must be an absolute HTTP or HTTPS URL without credentials, query, or fragment")
 	}
 	if strings.TrimSpace(config.Audience) == "" {
 		return nil, errors.New("oidc audience is required")
@@ -130,6 +137,9 @@ func flattenClaim(value any) []string {
 }
 
 func (authenticator *OIDCAuthenticator) verify(ctx context.Context, token string) (*oidcClaims, error) {
+	if len(token) == 0 || len(token) > maximumOIDCTokenBytes {
+		return nil, ErrUnauthenticated
+	}
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
 		return nil, ErrUnauthenticated
