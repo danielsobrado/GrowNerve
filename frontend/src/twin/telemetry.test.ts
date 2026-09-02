@@ -5,8 +5,8 @@ import { formatTelemetryValue, latestMeasurementsByChannel, readingByKey } from 
 describe("digital twin telemetry presentation", () => {
   it("formats common farm units for operators", () => {
     expect(formatTelemetryValue(20.14, "degC")).toBe("20.1 °C");
-    expect(formatTelemetryValue(68, "%RH")).toBe("68 % RH");
-    expect(formatTelemetryValue(72, "%")).toBe("72 %");
+    expect(formatTelemetryValue(68, "%RH")).toBe("68% RH");
+    expect(formatTelemetryValue(72, "%")).toBe("72%");
   });
 
   it("uses the newest sample and reports freshness", () => {
