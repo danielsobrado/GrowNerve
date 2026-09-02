@@ -87,6 +87,8 @@ The first version must remain useful without automatic nutrient dosing. Chemistr
 - **Portable local data:** browser-only farms persist in IndexedDB and can be exported/imported as versioned JSON archives.
 - **Edge-safe:** an ESP32 must retain essential schedules and safe states if the server disappears.
 - **WebGPU first:** the 3D client targets Three.js WebGPU first, with a deliberate fallback path where required.
+- **Data-driven twin:** reusable 3D components are renderer-agnostic JSON plus validated local assets; Three.js renders the component model rather than defining it.
+- **Declarative extensibility:** V0 component packs contain validated definitions/assets and do not execute arbitrary plugin JavaScript.
 - **One UI:** server-backed and browser-only deployments use the same screens, entity selection, 3D twin, and interaction model.
 - **Typed domain:** use explicit agricultural and control concepts rather than a generic everything-is-an-asset database.
 - **Event history:** meaningful farm actions are immutable historical events.
@@ -155,6 +157,8 @@ Key documents:
 - [Browser-only / GitHub Pages runtime](docs/21-browser-only-runtime.md)
 - [Implementation status and limitations](docs/22-implementation-status.md)
 - [Development, operations, and commissioning](docs/23-development-and-operations.md)
+- [Component and plugin system](docs/24-component-plugin-system.md)
+- [MCP component authoring and farm editing](docs/25-mcp-component-authoring.md)
 - [ESP32 reference firmware](firmware/esp32/README.md)
 
 ## Relationship to farmOS
