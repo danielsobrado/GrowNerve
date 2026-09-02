@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="GrowNerve">
+  <defs>
+    <linearGradient id="leaf" x1="14" y1="50" x2="48" y2="14" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#5fbd64"/>
+      <stop offset="1" stop-color="#a0e68d"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="15" fill="#0d130f"/>
+  <path d="M48.7 13.8C32.1 14.6 19.2 21.5 15.3 34.1c-2.4 7.7.3 13.6 5.9 16.1 6.4 2.8 13.3-.1 17.2-6.2 4.8-7.5 5.3-18.1 10.3-30.2Z" fill="url(#leaf)"/>
+  <path d="M17.3 49.9c7.2-9.5 15.1-17.1 25.8-23.8" fill="none" stroke="#0b150d" stroke-width="3.2" stroke-linecap="round"/>
+  <path d="M29.4 37.1 27.9 27M36.8 31.5l7.3.2" fill="none" stroke="#0b150d" stroke-width="2.1" stroke-linecap="round"/>
+  <circle cx="29.1" cy="36.8" r="2.2" fill="#d9f5d2"/>
+  <circle cx="36.8" cy="31.4" r="2.2" fill="#d9f5d2"/>
+</svg>
