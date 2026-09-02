@@ -45,7 +45,7 @@ func TestCommandAndAcknowledgementValidation(t *testing.T) {
 		t.Fatal("expired command accepted")
 	}
 	command.ExpiresAt = now.Add(time.Minute)
-	command.IssuedAt = now.Add(61 * time.Second)
+	command.IssuedAt = now.Add(MaximumFutureClockSkew + time.Second)
 	if err := command.Validate(now); err == nil {
 		t.Fatal("future-dated command accepted")
 	}
@@ -57,6 +57,39 @@ func TestCommandAndAcknowledgementValidation(t *testing.T) {
 	ack.Result = "unknown"
 	if err := ack.Validate(); err == nil {
 		t.Fatal("unknown ack result accepted")
+	}
+}
+
+func TestCommandRejectsStaleAndOverlongWindows(t *testing.T) {
+	now := time.Date(2026, 9, 2, 2, 0, 0, 0, time.UTC)
+	base := Command{ProtocolVersion: Version, CommandID: deviceID, TargetChannelID: channelID, Type: "set_percent", Value: 50}
+
+	valid := base
+	valid.IssuedAt = now.Add(-MaximumCommandLifetime)
+	valid.ExpiresAt = now.Add(time.Second)
+	if err := valid.Validate(now); err != nil {
+		t.Fatalf("boundary command rejected: %v", err)
+	}
+
+	overlong := base
+	overlong.IssuedAt = now
+	overlong.ExpiresAt = now.Add(MaximumCommandLifetime + time.Second)
+	if err := overlong.Validate(now); err == nil {
+		t.Fatal("command with excessive lifetime was accepted")
+	}
+
+	stale := base
+	stale.IssuedAt = now.Add(-MaximumCommandLifetime - time.Second)
+	stale.ExpiresAt = now.Add(time.Second)
+	if err := stale.Validate(now); err == nil {
+		t.Fatal("stale command was accepted")
+	}
+
+	backwards := base
+	backwards.IssuedAt = now.Add(time.Minute)
+	backwards.ExpiresAt = now
+	if err := backwards.Validate(now); err == nil {
+		t.Fatal("command expiring before issuance was accepted")
 	}
 }
 
