@@ -59,6 +59,11 @@ func NewMemoryStore() *MemoryStore { return &MemoryStore{} }
 func (store *MemoryStore) Enqueue(_ context.Context, topic, key string, payload json.RawMessage) (string, error) {
 	store.mu.Lock()
 	defer store.mu.Unlock()
+	for _, message := range store.messages {
+		if message.Topic == topic && message.Key == key {
+			return message.ID, nil
+		}
+	}
 	store.nextID++
 	id := time.Now().UTC().Format("20060102150405.000000") + "-" + itoa(store.nextID)
 	store.messages = append(store.messages, memoryMessage{Message: Message{
