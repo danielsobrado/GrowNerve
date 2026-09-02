@@ -10,6 +10,7 @@
 #include <time.h>
 
 #include "secrets.h"
+#include "command_replay.h"
 #include "edge_config.h"
 #include "edge_policy.h"
 #include "hardware_config.h"
@@ -17,7 +18,7 @@
 namespace {
 
 constexpr int kProtocolVersion = 1;
-constexpr const char *kFirmwareVersion = "0.1.5";
+constexpr const char *kFirmwareVersion = "0.1.6";
 constexpr uint8_t kFanPwmChannel = 0;
 constexpr uint32_t kFanPwmFrequency = 25000;
 constexpr uint8_t kFanPwmResolution = 8;
@@ -30,6 +31,7 @@ constexpr time_t kMinimumTrustedEpoch = 1704067200;  // 2024-01-01 UTC
 WiFiClientSecure secureClient;
 PubSubClient mqtt(secureClient);
 Preferences storage;
+CommandReplayCache commandReplay;
 
 EdgeSettings settings;
 String activeConfigVersion;
@@ -287,6 +289,13 @@ void publishCommandAck(const char *commandId, const char *result, const char *re
   mqtt.publish(topicFor("acks").c_str(), buffer, false);
 }
 
+void completeCommand(const char *commandId, const char *result, const char *reasonCode) {
+  if (!commandReplay.remember(storage, commandId, result, reasonCode)) {
+    Serial.printf("command replay result was not persisted: %s\n", commandId);
+  }
+  publishCommandAck(commandId, result, reasonCode);
+}
+
 const char *validateCommandPolicy(const char *channelId, const char *type, float value) {
   if (strcmp(channelId, CHANNEL_LIGHT) == 0) {
     return strcmp(type, "set_boolean") == 0 ? nullptr : "INVALID_COMMAND_TYPE";
@@ -308,51 +317,57 @@ void handleCommand(const JsonDocument &document) {
   const char *commandId = document["commandId"] | "";
   const char *channelId = document["targetChannelId"] | "";
   const char *type = document["type"] | "";
-  if (strlen(commandId) == 0 || strlen(channelId) == 0) return;
+  if (strlen(commandId) != 36 || strlen(channelId) == 0) return;
+
+  CommandReplayResult replay;
+  if (commandReplay.find(commandId, replay)) {
+    publishCommandAck(commandId, replay.result.c_str(), replay.reasonCode.c_str());
+    return;
+  }
 
   if (document["protocolVersion"].as<int>() != kProtocolVersion) {
-    publishCommandAck(commandId, "rejected", "UNSUPPORTED_PROTOCOL_VERSION");
+    completeCommand(commandId, "rejected", "UNSUPPORTED_PROTOCOL_VERSION");
     return;
   }
   if (emergencyLatched) {
-    publishCommandAck(commandId, "rejected", "EMERGENCY_STOP_ACTIVE");
+    completeCommand(commandId, "rejected", "EMERGENCY_STOP_ACTIVE");
     return;
   }
   Override *target = overrideFor(channelId);
   if (target == nullptr) {
-    publishCommandAck(commandId, "rejected", "UNKNOWN_CHANNEL");
+    completeCommand(commandId, "rejected", "UNKNOWN_CHANNEL");
     return;
   }
 
   time_t nowEpoch;
   if (!trustedClock(nowEpoch)) {
-    publishCommandAck(commandId, "rejected", "CLOCK_UNAVAILABLE");
+    completeCommand(commandId, "rejected", "CLOCK_UNAVAILABLE");
     return;
   }
   time_t issuedAt;
   time_t expiresAt;
   if (!parseUtcTimestamp(document["issuedAt"] | "", issuedAt) || !parseUtcTimestamp(document["expiresAt"] | "", expiresAt)) {
-    publishCommandAck(commandId, "rejected", "INVALID_COMMAND_TIME");
+    completeCommand(commandId, "rejected", "INVALID_COMMAND_TIME");
     return;
   }
   if (expiresAt <= issuedAt) {
-    publishCommandAck(commandId, "rejected", "INVALID_COMMAND_TIME");
+    completeCommand(commandId, "rejected", "INVALID_COMMAND_TIME");
     return;
   }
   if (expiresAt - issuedAt > kMaximumCommandLifetimeSeconds) {
-    publishCommandAck(commandId, "rejected", "COMMAND_TTL_TOO_LONG");
+    completeCommand(commandId, "rejected", "COMMAND_TTL_TOO_LONG");
     return;
   }
   if (expiresAt <= nowEpoch) {
-    publishCommandAck(commandId, "rejected", "COMMAND_EXPIRED");
+    completeCommand(commandId, "rejected", "COMMAND_EXPIRED");
     return;
   }
   if (issuedAt > nowEpoch + kMaximumFutureClockSkewSeconds) {
-    publishCommandAck(commandId, "rejected", "COMMAND_FROM_FUTURE");
+    completeCommand(commandId, "rejected", "COMMAND_FROM_FUTURE");
     return;
   }
   if (issuedAt < nowEpoch - kMaximumCommandLifetimeSeconds) {
-    publishCommandAck(commandId, "rejected", "COMMAND_STALE");
+    completeCommand(commandId, "rejected", "COMMAND_STALE");
     return;
   }
 
@@ -362,16 +377,16 @@ void handleCommand(const JsonDocument &document) {
   } else if (strcmp(type, "set_percent") == 0 && document["value"].is<float>()) {
     value = document["value"].as<float>();
     if (!isfinite(value) || value < 0 || value > 100) {
-      publishCommandAck(commandId, "rejected", "COMMAND_VALUE_OUT_OF_RANGE");
+      completeCommand(commandId, "rejected", "COMMAND_VALUE_OUT_OF_RANGE");
       return;
     }
   } else {
-    publishCommandAck(commandId, "rejected", "INVALID_COMMAND_VALUE");
+    completeCommand(commandId, "rejected", "INVALID_COMMAND_VALUE");
     return;
   }
 
   if (const char *reason = validateCommandPolicy(channelId, type, value); reason != nullptr) {
-    publishCommandAck(commandId, "rejected", reason);
+    completeCommand(commandId, "rejected", reason);
     return;
   }
 
@@ -380,14 +395,14 @@ void handleCommand(const JsonDocument &document) {
   const uint32_t localLimit = min(configuredLimit, kMaximumCommandLifetimeSeconds);
   const uint32_t durationSeconds = min(remainingSeconds, localLimit);
   if (durationSeconds == 0) {
-    publishCommandAck(commandId, "rejected", "COMMAND_EXPIRED");
+    completeCommand(commandId, "rejected", "COMMAND_EXPIRED");
     return;
   }
 
   target->active = true;
   target->value = value;
   target->expiresAtMillis = millis() + durationSeconds * 1000UL;
-  publishCommandAck(commandId, "applied", "");
+  completeCommand(commandId, "applied", "");
 }
 
 void onMessage(char *topic, uint8_t *payload, unsigned int length) {
@@ -507,6 +522,7 @@ void setup() {
   } else {
     Serial.println("no stored configuration; running safe defaults");
   }
+  commandReplay.load(storage);
   applyTimezone();
   failSafeOutputs();
 
