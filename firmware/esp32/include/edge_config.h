@@ -41,5 +41,5 @@ struct EdgeSettings {
 };
 
 bool parseEdgeSettings(const JsonObjectConst &config, EdgeSettings &out, String &error);
-void saveEdgeSettings(Preferences &storage, const EdgeSettings &settings, const String &version);
+bool saveEdgeSettings(Preferences &storage, const EdgeSettings &settings, const String &version);
 bool loadEdgeSettings(Preferences &storage, EdgeSettings &settings, String &version);
