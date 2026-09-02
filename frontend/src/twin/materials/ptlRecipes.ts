@@ -99,7 +99,7 @@ export const GROW_NERVE_PTL_RECIPES: Record<GrowNerveMaterialKey, MaterialRecipe
       roughness: 0.1,
       displacement: 0.004,
     }),
-  ]),
+  ], {}, "world"),
   "abs-dark": recipe(21931, {
     roughness: 0.56,
     clearcoat: 0.05,
@@ -168,5 +168,5 @@ export const GROW_NERVE_PTL_RECIPES: Record<GrowNerveMaterialKey, MaterialRecipe
       roughness: 0.11,
       displacement: 0.003,
     }),
-  ], { micro: 1.25, variation: 0.14 }),
+  ], { micro: 1.25, variation: 0.14 }, "world"),
 };
