@@ -77,6 +77,11 @@ func ProjectWithQueries(ctx context.Context, queries *gen.Queries, document Docu
 		if err != nil {
 			entityID = owner
 		}
+		if err := queries.RetireConflictingDeviceChannelKey(ctx, gen.RetireConflictingDeviceChannelKeyParams{
+			FacilityID: owner, Key: channel.Key, ID: id,
+		}); err != nil {
+			return fmt.Errorf("retire historical channel key %s: %w", channel.Key, err)
+		}
 		params := gen.UpsertDeviceChannelParams{
 			ID: id, FacilityID: owner,
 			EntityType: nonEmpty(channel.EntityType, "facility"), EntityID: entityID,
