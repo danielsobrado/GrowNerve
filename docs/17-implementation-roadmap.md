@@ -152,29 +152,138 @@ Exit criteria:
 
 - simulated unsafe values create useful, deduplicated alerts in both runtimes
 
-## Phase 6 — 3D digital twin V0
+## Phase 6A — Component specification and runtime
+
+The component contract is implemented **before** the Three.js scene. Three.js must consume the contract rather than defining it.
+
+See `24-component-plugin-system.md`.
+
+Deliver:
+
+- versioned component/plugin/farm-layout JSON Schemas
+- stable component IDs with separate SemVer versions
+- normalized component model
+- component definition versus instance model
+- capabilities
+- logical telemetry/control semantics
+- ports and anchors
+- primitive model definitions
+- GLB asset metadata contract
+- assembly definitions
+- semantic/referential/asset validation
+- schema migration framework
+- built-in component registry
+- imported/local component registry
+- deterministic component dependency/version resolution
+- browser IndexedDB storage for imported component definitions/assets
+- sample valid/invalid component packs
+
+Initial built-in definitions cover the reference installation:
+
+```text
+grow tent
+LED panel
+circulation fan
+30 L-class rectangular reservoir
+net pot
+lettuce growth stages
+air pump
+air stone
+ESP32/controller enclosure
+air temperature/RH sensor
+water temperature sensor
+water level sensor
+```
+
+Exit criteria:
+
+- the complete pilot layout can be represented without Three.js-specific component JSON
+- built-in and imported component definitions resolve through the same registry interface
+- component conflicts are explicit rather than last-write-wins
+- invalid packs/assets are rejected before installation
+- a primitive-only reference layout loads in both server and browser runtime services
+
+## Phase 6B — 3D digital twin V0
 
 Deliver:
 
 - Three.js WebGPU-first scene foundation
-- reference 3 x 3 tent GLB scene
+- generic component-definition-to-render-model adapter
+- primitive geometry renderer
+- GLB loading/cache
+- reference 3 x 3 tent scene assembled from registered component definitions/instances
 - entity binding index
 - shared 2D/3D selection
 - raycast picking
 - HTML tooltips
 - entity inspector
-- radial menus
+- capability-driven radial menus
 - alert highlight/focus
 - plant positions and discrete growth visuals
 - live reservoir/equipment/sensor status effects
 
 Exit criteria:
 
+- renderer does not contain pilot-specific branches such as `if componentType === "pump"` for normal behavior
 - every pilot component can be selected in 3D
 - selecting an alert can focus the affected object
 - tooltips display live/freshness-aware data
-- radial actions resolve the correct domain entity
+- radial actions resolve from component capability plus domain permission/state
 - the same scene works on GitHub Pages using IndexedDB/simulator data
+
+## Phase 6C — Component pack management and farm-layout authoring
+
+Deliver:
+
+- component pack ZIP import/export
+- install/uninstall and version/conflict handling
+- farm-layout instance creation/movement/configuration
+- assembly instantiate/save workflows
+- port compatibility validation
+- connection persistence/visualization where useful
+- anchor metadata and simple snap placement foundation
+- bundled project export path for local component assets
+
+Do not build a general CAD editor.
+
+Exit criteria:
+
+- a user can import a valid third-party component pack without code changes
+- imported components behave like built-ins in the 3D twin
+- an exported farm can preserve exact component dependencies and reload deterministically
+
+## Phase 6D — MCP component authoring proof
+
+See `25-mcp-component-authoring.md`.
+
+Start with the smallest useful MCP surface:
+
+```text
+components.schema
+components.search
+components.validate
+components.create
+farms.get_layout
+farms.add_component
+farms.validate_layout
+```
+
+Deliver:
+
+- read-only component/schema discovery
+- structured validation errors
+- local declarative component creation
+- primitive-model authoring
+- farm-layout read/add/validate operations
+- optimistic-concurrency handling for farm changes
+- audit source metadata for MCP mutations
+
+Exit criteria:
+
+- an MCP client can create a valid primitive component without generating Three.js code
+- the MCP-created component can be placed in the reference layout and rendered through the normal registry/renderer path
+- MCP and UI validation accept/reject the same fixtures
+- no MCP operation bypasses component validation, farm concurrency, authorization, or command safety
 
 ## Phase 7 — Low-risk control
 
@@ -270,6 +379,19 @@ Later work:
 - grow comparisons
 - energy/water/nutrient efficiency
 - recommendations
+
+## Later extensibility work
+
+After the local component-pack and MCP contracts are proven against real use, consider:
+
+- optional remote component catalog
+- pack signing/trust metadata
+- publisher tooling
+- MCP asset inspection/GLB attachment
+- MCP assemblies and project import/export
+- richer anchor snapping/editor ergonomics
+
+None of these is required to validate the V0 architecture.
 
 ## Prioritization rule
 
