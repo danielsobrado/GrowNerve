@@ -18,7 +18,7 @@ const HUD_METRICS: HudMetric[] = [
 ];
 
 export function TwinHud({ data }: { data: FarmData }) {
-  const latest = useMemo(() => latestMeasurementsByChannel(data), [data.measurements]);
+  const latest = useMemo(() => latestMeasurementsByChannel(data), [data]);
   const sceneEntities = data.scene_layouts[0]?.entities ?? [];
   const readings = HUD_METRICS.map((metric) => {
     const target = sceneEntities.find((entry) => entry.entity_type === metric.scope);
