@@ -1,246 +1,315 @@
-# 12 — 3D Digital Twin and Three.js Plan
+# 12 — 3D Digital Twin and Three.js
 
 ## Product role
 
-The 3D view is an operational digital twin of the farm. It is not a separate visualization demo. Every interactive object maps to a real GrowNerve domain entity or stable scene structure.
-
-Examples:
+The 3D view is an operational digital twin, not a visualization demo. Interactive objects bind to GrowNerve domain entities and share the same identities used by tables, alerts, history, and commands.
 
 ```text
-Grow tent mesh       -> Zone UUID
-Reservoir mesh       -> Reservoir UUID
-Plant mesh           -> PlantPosition UUID
-Fan mesh             -> Device UUID
-pH probe marker      -> Device/Channel UUID
-LED fixture          -> Device UUID
-ESP32 enclosure      -> Device UUID
-Leak sensor marker   -> Device/Channel UUID
+Grow tent        -> Zone UUID
+Reservoir        -> Reservoir UUID
+Plant            -> PlantPosition UUID
+Fan / light      -> Device UUID
+Sensor visual    -> Device UUID and bound Channel UUIDs
 ```
 
-## Technology direction
-
-### Renderer
-
-Use Three.js with a WebGPU-first renderer. The application should detect support and maintain an explicit fallback strategy where required by target browsers/hardware.
-
-Do not build two feature-divergent renderers. Scene/data/interaction logic must be renderer-agnostic as far as practical.
-
-### React integration
-
-The UI is React/TypeScript. Either direct Three.js integration or React Three Fiber may be used after a spike, but the decision must preserve:
-
-- WebGPU-first rendering
-- direct access to Three.js capabilities
-- predictable resource lifecycle
-- good integration with shared React selection/query state
-- performance with repeated plant assets
-
-The domain model must not depend on the chosen React wrapper.
-
-### Asset format
-
-Prefer glTF/GLB for runtime models.
-
-Pipeline targets:
-
-- consistent real-world units
-- origin/pivot conventions
-- Meshopt/Draco compression where beneficial
-- compressed textures where supported
-- LODs for larger scenes
-- instancing for repeated plants/components
-
-Store source authoring assets separately from optimized runtime GLBs when those assets exist.
-
-## Scene graph
-
-A facility scene may be structured conceptually as:
+The authoritative operational identity remains:
 
 ```text
-FacilityRoot
-  Room/Tent zone
-    structure
-    light
-    fan
-    reservoir
-      water visual
-      probes
-      air stones
-    controller
-    plant positions
-      P1 plant
-      P2 plant
-      P3 plant
-      P4 plant
+(entity_type, entity_id)
 ```
 
-Structural meshes without a domain identity remain scene-only nodes. Operational meshes carry an entity binding.
+Do not introduce a second component-instance identity for the same operational object.
+
+See `24-component-plugin-system.md` for the declarative component model that will replace hard-coded visual profiles.
+
+## What is implemented now
+
+The current twin is working software and is the migration baseline.
+
+Relevant files:
+
+```text
+frontend/src/domain/model.ts
+frontend/src/twin/DigitalTwin.tsx
+frontend/src/twin/sceneState.ts
+frontend/src/runtime/pilotData.ts
+```
+
+Current behavior:
+
+- React Three Fiber over Three.js
+- WebGPU renderer attempted first, explicit WebGL fallback
+- `SceneLayout`/`SceneEntity` stored inside `FarmData`
+- scene selection keyed by `(entity_type, entity_id)`
+- procedural pilot geometry
+- profile-based rendering for `zone`, `reservoir`, `light`, `fan`, and `plant`
+- profile-based radial actions
+- HTML tooltip overlays
+- fan animation, light state, reservoir level, and plant-health visuals
+- shared selection between the normal UI and twin
+
+This is intentionally described as implemented. Component packs, component registry persistence, GLB pack import, topology ports, and MCP authoring are **not implemented yet**.
+
+## Migration direction
+
+Do not rewrite the twin from scratch.
+
+The migration is additive:
+
+```text
+current SceneEntity
+  entity_type
+  entity_id
+  profile
+  position
+  scale
+        |
+        v
+add exact component_ref
+        |
+        v
+registry resolves component definition
+        |
+        v
+generic primitive/GLB renderer
+        |
+        v
+remove profile dependency after compatibility period
+```
+
+The current procedural geometry becomes the first set of built-in primitive component definitions. This gives a deterministic before/after visual and interaction fixture.
+
+## Rendering architecture
+
+Target flow:
+
+```text
+FarmData / current domain state
+            |
+            +---- SceneLayout / SceneEntity
+            |           |
+            |           v
+            |     exact component_ref
+            |           |
+            |           v
+            |     Component Registry
+            |           |
+            +-----------+
+                    |
+                    v
+           Scene Render State
+                    |
+          +---------+---------+
+          |                   |
+          v                   v
+       Three.js            DOM UI
+   geometry/materials   tooltip/radial/inspector
+```
+
+Three.js must not own farm semantics. Component definitions must not contain MQTT, HTTP, authorization, or physical-safety logic.
+
+## Technology choices
+
+### Three.js and React Three Fiber
+
+React Three Fiber is already the integration layer and should remain unless measured problems justify changing it.
+
+It currently provides:
+
+- normal React composition
+- Three.js event/raycast integration
+- lifecycle integration with the application
+- `@react-three/drei` helpers such as `Html` and `OrbitControls`
+
+Do not introduce a second rendering framework.
+
+### WebGPU first, WebGL fallback
+
+`DigitalTwin.tsx` already attempts `WebGPURenderer` when `navigator.gpu` exists and falls back to `WebGLRenderer` if initialization fails.
+
+Keep scene/domain logic independent of which renderer succeeds.
+
+Do not create WebGPU-only product behavior unless there is a graceful supported fallback or the feature is explicitly optional.
 
 ## Scene entity binding
 
-Use one metadata abstraction:
+The existing domain model already provides the correct binding:
 
 ```ts
-interface SceneEntityBinding {
-  entityType: EntityType;
-  entityId: string;
-  interactionProfile: string;
+interface SceneEntity {
+  entity_type: EntityType;
+  entity_id: UUID;
+  profile: string;
+  position: [number, number, number];
+  scale: [number, number, number];
 }
 ```
 
-Runtime objects may expose this through `Object3D.userData`, but `userData` is an adapter detail; application selection state receives only the typed binding.
+The component migration extends this shape rather than replacing it:
 
-## Selection architecture
-
-There is one shared selection store for 2D and 3D.
-
-```text
-Three.js hit
-  -> resolve SceneEntityBinding
-  -> set selected entity
-  -> inspector/query layer fetches entity
-  -> highlight selection
+```ts
+component_ref
+rotation?
+configuration?
+channel_bindings?
 ```
 
-The inverse also works:
+`profile` becomes temporary compatibility metadata.
+
+Runtime `Object3D.userData` may cache resolved binding information, but it is an adapter detail. Application selection continues to carry domain identity only.
+
+## Selection and picking
+
+The current `entityKey(entity_type, entity_id)` approach is correct.
 
 ```text
-Alert/table/search selects entity
-  -> shared selection state
-  -> scene index resolves entity binding
-  -> highlight/focus camera
+3D hit
+ -> entity key
+ -> shared selection
+ -> inspector/action state
 ```
 
-Maintain an in-memory scene index:
+Inverse navigation should continue to work:
 
 ```text
-(entityType, entityId) -> Object3D / instance reference
+alert/table/search selection
+ -> same entity key
+ -> scene lookup
+ -> highlight/focus
 ```
 
-## Picking
+Raycasting is adequate for the pilot. Optimize only when measured scene size requires it:
 
-For the initial scene size, Three.js raycasting is sufficient and simpler than GPU picking.
+- raycast only interactive objects
+- use simple hit proxies for complex GLBs
+- use instancing for repeated plants/components
+- add GPU picking only after profiling proves raycasting insufficient
 
-Optimize with:
+## Tooltips and overlays
 
-- interaction layers
-- bounding proxies for complex meshes
-- only raycast interactive objects
-- instanced-mesh `instanceId` mapping for repeated plant positions
+Keep text UI in the DOM.
 
-Move to GPU picking only after measured raycast performance becomes a problem.
-
-## Hover tooltips
-
-Tooltips are HTML overlays, not 3D text.
-
-Flow:
-
-```text
-pointer move
- -> raycast throttled to frame/interval
- -> resolve entity
- -> read cached current-state summary
- -> project world anchor to screen
- -> render HTML tooltip
-```
-
-Benefits:
+Current `Html` tooltips are the right direction because they provide:
 
 - sharp text
-- accessibility
-- normal layout/styling
-- easy localization
-- no texture atlas management
+- accessible HTML
+- normal localization/layout
+- simpler controls and confirmations
 
-Tooltip anchoring must:
+As the twin matures, tooltip data must show freshness/quality for live measurements and avoid presenting stale telemetry as current.
 
-- clamp to viewport
-- hide when target is occluded if practical
-- avoid flicker when crossing child meshes
-- respect touch devices where hover does not exist
+## Actions and radial menus
 
-## Radial menus
+Today `sceneState.ts` maps `profile` to action names. That is a compatibility implementation, not the long-term extension point.
 
-Radial menus should be HTML overlays anchored to the selected object's projected screen position. They are visually connected to the 3D entity while retaining normal DOM interaction/accessibility.
-
-Why not render the entire menu in 3D:
-
-- text/input quality is worse
-- accessibility is harder
-- responsive layout is harder
-- command confirmation becomes awkward
-
-### Interaction profiles
-
-The server/client defines profile-to-action mapping, for example:
+Target action resolution:
 
 ```text
-sensor:
-  inspect
-  history
-  calibrate
-  alerts
-  configure
-
-plant:
-  inspect
-  observe
-  photo
-  history
-  harvest
-
-fan:
-  inspect
-  set_output
-  override
-  history
-  maintenance
-
-reservoir:
-  inspect
-  chemistry
-  add_input
-  refill
-  history
+component capabilities
+ + entity type/state
+ + bound logical Channels
+ + runtime mode
+ + authenticated role
+ + physical safety policy where command-related
+        |
+        v
+GrowNerve-owned action catalog
+        |
+        v
+radial menu / inspector
 ```
 
-The client filters actions using capability, state, and permissions. Server authorization/safety remains authoritative.
+Community component JSON must not be able to invent privileged actions. It can describe capabilities; GrowNerve decides which workflows exist and whether the current caller may invoke them.
 
-## Command interaction
+## Dynamic render behavior
 
-Example fan control:
+A fully generic component file should not mean arbitrary plugin code.
+
+GrowNerve owns a small normalized render-state vocabulary, for example:
 
 ```text
-select fan
- -> radial menu
- -> Set output
- -> small DOM control opens
- -> choose 55%
- -> POST command intent
- -> server safety validation
- -> MQTT command
- -> ack
- -> scene animation/state updates from acknowledged state telemetry
+selected
+online/offline
+alert severity
+power on/off/pending
+output ratio
+fill ratio
+measurement value/quality/freshness
+growth stage
+plant health
 ```
 
-Never optimistically animate a hazardous actuator as successfully changed before the system receives accepted/applied state.
+Built-in renderer behaviors consume that state:
+
+```text
+fan rotation      <- power/output
+reservoir water   <- fill ratio
+light emissive    <- power state
+plant visual      <- growth/health
+warning marker    <- alert severity
+```
+
+A declarative component may opt into supported behaviors. It does not ship JavaScript to implement them.
+
+## Models and assets
+
+### Primitive first
+
+The current scene already demonstrates that simple geometry is enough for a useful operational twin.
+
+The first component renderer should support:
+
+```text
+box
+sphere
+cylinder
+plane
+```
+
+Those definitions should reproduce the existing pilot visuals before GLB support is refactored in.
+
+### GLB second
+
+Use `.glb` as the first authored-model format for component packs.
+
+Requirements:
+
+- real-world meters
+- consistent orientation and pivot rules
+- local assets only
+- no remote model/texture references
+- bounded file, triangle, node, texture, and animation budgets
+- cache by immutable asset digest
+
+Do not put imported GLB bytes inside the current whole-farm Dexie snapshot. See document 24 for registry/asset storage.
+
+## Plants
+
+Plants use the same component system but their visual state changes over time.
+
+Initial strategy:
+
+- discrete supported growth-stage visuals
+- optional bounded scale/canopy interpolation
+- health/attention overlay from current domain state
+
+The visual is an operational representation, not a biological prediction.
 
 ## Camera behavior
 
-Modes:
+Keep navigation simple for the pilot.
 
 ### Explore
 
-Orbit/pan/zoom around the facility.
+Orbit/pan/zoom.
 
 ### Focus
 
-Smoothly frame a selected entity while maintaining user orientation.
+Frame a selected entity while preserving understandable orientation.
 
-### Zone preset
+### Presets — later as needed
 
-Named views such as:
+Examples:
 
 ```text
 Tent overview
@@ -249,184 +318,113 @@ Top-down plant view
 Controller/electrical view
 ```
 
-Avoid free-fly controls in V0; they increase navigation complexity without helping a small farm.
+Avoid free-fly/CAD navigation until a larger facility demonstrates the need.
 
-## Scene editing
+## Scene editing boundary
 
-Do not build a full CAD editor in V0.
+Do not build a CAD editor.
 
-Initial approach:
+Useful future editing is deliberately constrained:
 
-- scene/layout authored/configured through controlled JSON/YAML/seed data or a simple admin form
-- runtime UI supports inspection, not arbitrary mesh editing
-
-Later editor capabilities may include:
-
-- place device
-- move sensor marker
-- assign mesh to entity
+- assign/replace component definition
+- move/rotate/scale a scene binding
+- place a new domain-backed visual
+- bind compatible Channels
+- connect supported physical ports
+- snap compatible anchors
 - save camera preset
 
-## Asset library
+Every saved result is explicit data. Do not rely on hidden editor state that must be replayed to reconstruct a layout.
 
-Create reusable GLB assets for common components:
+## Command interaction
+
+3D control uses the same command path as the rest of GrowNerve.
 
 ```text
-grow tent
-rack/shelf
-DWC tote/reservoir
-net pot
-lettuce growth stages
-LED panel
-circulation fan
-air pump
-air stone
-ESP32 enclosure
-pH probe
-EC probe
-temperature probe
-level sensor
-leak sensor
-dosing pump
-valve
-camera
+select fan
+ -> choose Set output
+ -> submit command intent
+ -> authorization
+ -> safety/interlock validation
+ -> durable command publication
+ -> acknowledgement/state telemetry
+ -> visual state changes
 ```
 
-Models should be recognizable, lightweight, and dimensionally plausible rather than photorealistically heavy.
+Do not visually claim that physical equipment changed merely because the request was sent.
 
-## Plant visualization
+Browser mode may acknowledge simulator commands and must keep simulated status clear.
 
-Plants need a different strategy than equipment because appearance changes over time.
+## Performance rules
 
-V0 options:
+Performance goals are guidance, not unmeasured guarantees.
 
-- discrete growth-stage models
-- scale/canopy interpolation between stage representations
+Priorities:
 
-A plant position's visual stage can derive from grow-cycle stage/day but must not pretend to be an exact biological simulation.
+- no full scene reconstruction for one telemetry sample
+- cache immutable component/model assets
+- instance repeated geometry where worthwhile
+- avoid high-poly hidden details
+- keep dynamic material/state updates local
+- dispose uncached Three.js resources explicitly
+- measure desktop/tablet reference hardware before setting hard budgets
 
-Later, actual camera/computer-vision estimates may influence the displayed canopy size.
+Do not add LOD systems, GPU compute, Meshopt/Draco, or custom shaders simply because Three.js/WebGPU supports them. Add them when scene measurements justify the complexity.
 
-## Live status visualization
+## Testing strategy
 
-Use subtle, semantic effects:
+### Existing compatibility tests
 
-### Selected
+Preserve behavior around:
 
-outline/ring/halo
+- `entityKey()` identity
+- scene-index mapping
+- profile-action compatibility during migration
+- WebGPU/WebGL startup path
+- browser/server selection behavior
 
-### Warning
+### Component migration tests
 
-small status marker or emissive accent
+Add:
 
-### Offline
+- deterministic profile -> component-ref mapping
+- same entity key before/after migration
+- primitive definition resolves to expected renderer
+- missing component dependency fails visibly
+- channel bindings reference compatible existing Channels
+- capability action resolution cannot grant unauthorized commands
 
-desaturated/status marker
+### Browser/E2E
 
-### Fan running
+Cover:
 
-actual blade rotation at visually bounded speed
+- selecting a mesh selects the correct UUID
+- alert/table selection focuses the same entity
+- tooltip/current-state data is correct
+- radial action invokes the expected normal workflow
+- unsafe command rejection is visible
+- imported valid component renders after registry persistence exists
 
-### Light on
+### Visual regression
 
-fixture emissive state plus limited scene-light change
+Use the deterministic pilot layout and stable camera as the comparison scene before and after the generic-renderer refactor.
 
-### Reservoir level
+Do not rely on pixel-perfect screenshots across WebGPU and WebGL; assert geometry placement, semantic state, and interaction correctness separately.
 
-water plane height based on valid level data
+## Reference scene
 
-### Pump/flow
-
-small flow indicator while active
-
-Avoid flashing, excessive bloom, constant particles, or unrealistic effects.
-
-## WebGPU-specific opportunities
-
-Once baseline rendering works, WebGPU can support richer local visualization efficiently:
-
-- GPU-driven particle/flow visualization
-- many repeated plant instances
-- node/TSL materials for health/status effects
-- compute-assisted visualization where it provides measurable value
-- local image/vision workloads elsewhere in the app where supported
-
-Do not add compute shaders merely because WebGPU exists.
-
-## Performance budgets
-
-Define budgets early for target tablet/laptop hardware.
-
-Initial goals:
-
-- interactive 60 fps on a modern desktop for reference scene
-- graceful ~30+ fps on supported tablets
-- scene remains responsive while live telemetry updates
-- no full scene rebuild on measurement updates
-
-Rules:
-
-- telemetry updates modify small visual state objects/material uniforms, not React-remount the scene
-- dispose geometries/materials/textures explicitly
-- cache GLB assets
-- use instancing for repeated components
-- avoid high-poly hidden interior geometry
-- use LOD for commercial-scale scenes
-
-## 3D state adapter
-
-Do not pass raw API responses throughout scene components. Build a small scene view-model layer that converts current domain state into render state:
+The acceptance scene remains the real pilot:
 
 ```text
-DeviceState -> running/offline/output percent
-ChannelState -> value/quality/target status
-PlantPositionState -> occupied/stage/health marker
-ReservoirState -> fill ratio/chemistry status
-AlertState -> severity marker
-```
-
-This keeps Three.js rendering independent from API response shape.
-
-## Tooltips and data freshness
-
-Every live tooltip must show freshness or quality where relevant. Never display cached values as current without stale indication.
-
-## 3D test strategy
-
-Unit test:
-
-- entity-to-scene mapping
-- interaction-profile resolution
-- render-state adapters
-- radial-action capability filtering
-
-Browser/E2E test:
-
-- selecting mesh selects correct UUID
-- 2D selection focuses correct 3D entity
-- tooltip displays expected live data
-- radial menu action calls correct command workflow
-- unsafe command rejection is displayed
-- scene works with WebGPU and supported fallback path
-
-Visual regression:
-
-Use a small deterministic reference scene and stable camera poses for screenshot comparison. Avoid relying only on screenshot tests for interaction correctness.
-
-## V0 reference scene
-
-The first 3D deliverable should represent exactly the real pilot system:
-
-```text
-3 x 3 tent shell
+3 x 3 ft tent
 240 W LED
-fan
+circulation fan
 30 L-class reservoir
-four net pots/plants
+four plant positions
 two air-stone positions
-air pump outside/adjacent
+air pump
 ESP32/controller
-sensor markers for air temp/RH, water temp, water level
+sensor markers for air temperature/RH, water temperature, water level
 ```
 
-This scene becomes both the product demo and the operational UI for the actual installation.
+The next meaningful 3D milestone is **not** a prettier scene. It is rendering this same scene from validated component definitions while preserving the exact existing domain identities and interaction behavior.
