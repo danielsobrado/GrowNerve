@@ -17,7 +17,7 @@
 namespace {
 
 constexpr int kProtocolVersion = 1;
-constexpr const char *kFirmwareVersion = "0.1.3";
+constexpr const char *kFirmwareVersion = "0.1.4";
 constexpr uint8_t kFanPwmChannel = 0;
 constexpr uint32_t kFanPwmFrequency = 25000;
 constexpr uint8_t kFanPwmResolution = 8;
@@ -219,8 +219,6 @@ void addAcknowledgedAt(JsonDocument &document) {
   if (utcTimestamp(timestamp, sizeof(timestamp))) {
     document["acknowledgedAt"] = timestamp;
   } else {
-    // A refusal made before time synchronisation still needs to reach the
-    // server. The server treats this sentinel as receipt-time for ordering.
     document["acknowledgedAt"] = "1970-01-01T00:00:01Z";
   }
 }
@@ -241,7 +239,6 @@ void publishConfigAck(const String &version, bool accepted, const String &detail
 
 void handleConfig(const JsonDocument &document) {
   const String version = document["configVersion"] | "";
-  String error;
   if (document["protocolVersion"].as<int>() != kProtocolVersion) {
     publishConfigAck(version, false, "unsupported protocol version");
     return;
@@ -251,14 +248,24 @@ void handleConfig(const JsonDocument &document) {
     publishConfigAck(version, false, "configVersion is required");
     return;
   }
+  if (!document["config"].is<JsonObjectConst>()) {
+    publishConfigAck(version, false, "config must be an object");
+    return;
+  }
+
   EdgeSettings parsed;
+  String error;
   if (!parseEdgeSettings(document["config"].as<JsonObjectConst>(), parsed, error)) {
     publishConfigAck(version, false, error);
     return;
   }
+  if (!saveEdgeSettings(storage, parsed, version)) {
+    publishConfigAck(version, false, "configuration persistence failed");
+    return;
+  }
+
   settings = parsed;
   activeConfigVersion = version;
-  saveEdgeSettings(storage, settings, activeConfigVersion);
   applyTimezone();
   publishConfigAck(version, true, "");
   Serial.printf("adopted configuration %s\n", version.c_str());
@@ -276,6 +283,23 @@ void publishCommandAck(const char *commandId, const char *result, const char *re
   char buffer[384];
   serializeJson(document, buffer, sizeof(buffer));
   mqtt.publish(topicFor("acks").c_str(), buffer, false);
+}
+
+const char *validateCommandPolicy(const char *channelId, const char *type, float value) {
+  if (strcmp(channelId, CHANNEL_LIGHT) == 0) {
+    return strcmp(type, "set_boolean") == 0 ? nullptr : "INVALID_COMMAND_TYPE";
+  }
+  if (strcmp(channelId, CHANNEL_FAN) == 0) {
+    if (strcmp(type, "set_percent") != 0) return "INVALID_COMMAND_TYPE";
+    if (settings.hasFanMinimum && value < settings.fanMinimumPercent) return "LOCAL_SAFETY_LIMIT";
+    return nullptr;
+  }
+  if (strcmp(channelId, CHANNEL_AIR_PUMP) == 0) {
+    if (strcmp(type, "set_boolean") != 0) return "INVALID_COMMAND_TYPE";
+    if (settings.airPumpAlwaysOn && value <= 50.0f) return "LOCAL_SAFETY_LIMIT";
+    return nullptr;
+  }
+  return "UNKNOWN_CHANNEL";
 }
 
 void handleCommand(const JsonDocument &document) {
@@ -332,6 +356,11 @@ void handleCommand(const JsonDocument &document) {
     return;
   }
 
+  if (const char *reason = validateCommandPolicy(channelId, type, value); reason != nullptr) {
+    publishCommandAck(commandId, "rejected", reason);
+    return;
+  }
+
   uint32_t remainingSeconds = (uint32_t)(expiresAt - nowEpoch);
   uint32_t localLimit = settings.commandTimeoutSeconds > 0 ? settings.commandTimeoutSeconds : 300U;
   uint32_t durationSeconds = min(remainingSeconds, localLimit);
@@ -353,11 +382,11 @@ void onMessage(char *topic, uint8_t *payload, unsigned int length) {
     return;
   }
   const String subject(topic);
-  if (subject.endsWith("/config")) {
+  if (subject == topicFor("config")) {
     handleConfig(document);
     return;
   }
-  if (subject.endsWith("/commands")) handleCommand(document);
+  if (subject == topicFor("commands")) handleCommand(document);
 }
 
 void publishTelemetry(const char *timestamp, uint32_t sequence) {
@@ -417,12 +446,15 @@ bool connectBroker() {
   lastReconnectAttemptMillis = millis();
 
   Serial.println("connecting to broker");
-  if (!mqtt.connect(MQTT_USERNAME, MQTT_USERNAME, MQTT_PASSWORD)) {
+  if (!mqtt.connect(DEVICE_ID, MQTT_USERNAME, MQTT_PASSWORD)) {
     Serial.printf("broker connect failed, state %d\n", mqtt.state());
     return false;
   }
-  mqtt.subscribe(topicFor("config").c_str(), 1);
-  mqtt.subscribe(topicFor("commands").c_str(), 1);
+  if (!mqtt.subscribe(topicFor("config").c_str(), 1) || !mqtt.subscribe(topicFor("commands").c_str(), 1)) {
+    Serial.println("broker subscription failed");
+    mqtt.disconnect();
+    return false;
+  }
   Serial.println("broker connected");
   return true;
 }
