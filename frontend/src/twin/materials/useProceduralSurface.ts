@@ -1,7 +1,7 @@
 import { ProceduralMaterial, type MaterialRecipe, type ProceduralMaterialBackend } from "@drusniel/ptl-runtime";
 import { useThree } from "@react-three/fiber";
 import { useEffect, type RefObject } from "react";
-import type { Material, Mesh } from "three";
+import { WebGLRenderer, type Material, type Mesh } from "three";
 
 interface PreviousMeshMaterials {
   material: Material | Material[];
@@ -9,10 +9,7 @@ interface PreviousMeshMaterials {
   customDistanceMaterial?: Material;
 }
 
-const rendererBackend = (renderer: unknown): ProceduralMaterialBackend => {
-  const candidate = renderer as { isWebGPURenderer?: boolean };
-  return candidate.isWebGPURenderer ? "webgpu" : "webgl";
-};
+const rendererBackend = (renderer: unknown): ProceduralMaterialBackend => renderer instanceof WebGLRenderer ? "webgl" : "webgpu";
 
 export function useProceduralSurface(meshRef: RefObject<Mesh | null>, recipe: MaterialRecipe): void {
   const renderer = useThree((state) => state.gl);
