@@ -8,6 +8,8 @@ import (
 	"time"
 )
 
+const defaultMaximumClientBuckets = 10000
+
 type RateLimit struct {
 	Rate  float64
 	Burst float64
@@ -19,11 +21,13 @@ type bucket struct {
 }
 
 type Limiter struct {
-	mu           sync.Mutex
-	buckets      map[string]*bucket
-	limit        RateLimit
-	now          func() time.Time
-	idleEviction time.Duration
+	mu             sync.Mutex
+	buckets        map[string]*bucket
+	overflow       *bucket
+	limit          RateLimit
+	now            func() time.Time
+	idleEviction   time.Duration
+	maximumBuckets int
 }
 
 func NewLimiter(limit RateLimit) *Limiter {
@@ -35,7 +39,7 @@ func NewLimiter(limit RateLimit) *Limiter {
 	}
 	return &Limiter{
 		buckets: map[string]*bucket{}, limit: limit,
-		now: time.Now, idleEviction: 10 * time.Minute,
+		now: time.Now, idleEviction: 10 * time.Minute, maximumBuckets: defaultMaximumClientBuckets,
 	}
 }
 
@@ -45,18 +49,32 @@ func (limiter *Limiter) Allow(client string) bool {
 	defer limiter.mu.Unlock()
 
 	existing, found := limiter.buckets[client]
-	if !found {
-		limiter.evictIdle(now)
-		limiter.buckets[client] = &bucket{tokens: limiter.limit.Burst - 1, lastSeen: now}
-		return true
+	if found {
+		return limiter.allowBucket(existing, now)
 	}
-	elapsed := now.Sub(existing.lastSeen).Seconds()
-	existing.tokens = min(limiter.limit.Burst, existing.tokens+elapsed*limiter.limit.Rate)
-	existing.lastSeen = now
-	if existing.tokens < 1 {
+
+	limiter.evictIdle(now)
+	if len(limiter.buckets) >= limiter.maximumBuckets {
+		if limiter.overflow == nil {
+			limiter.overflow = &bucket{tokens: limiter.limit.Burst, lastSeen: now}
+		}
+		return limiter.allowBucket(limiter.overflow, now)
+	}
+
+	limiter.buckets[client] = &bucket{tokens: limiter.limit.Burst - 1, lastSeen: now}
+	return true
+}
+
+func (limiter *Limiter) allowBucket(entry *bucket, now time.Time) bool {
+	elapsed := now.Sub(entry.lastSeen).Seconds()
+	if elapsed > 0 {
+		entry.tokens = min(limiter.limit.Burst, entry.tokens+elapsed*limiter.limit.Rate)
+	}
+	entry.lastSeen = now
+	if entry.tokens < 1 {
 		return false
 	}
-	existing.tokens--
+	entry.tokens--
 	return true
 }
 
@@ -65,6 +83,9 @@ func (limiter *Limiter) evictIdle(now time.Time) {
 		if now.Sub(entry.lastSeen) > limiter.idleEviction {
 			delete(limiter.buckets, client)
 		}
+	}
+	if limiter.overflow != nil && now.Sub(limiter.overflow.lastSeen) > limiter.idleEviction {
+		limiter.overflow = nil
 	}
 }
 
