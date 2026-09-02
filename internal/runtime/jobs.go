@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -299,10 +300,30 @@ func applyTransitions(alerts []map[string]any, transitions []alert.Transition, n
 	return alerts, changed
 }
 
+func configPublishCacheEntry(version string, sentAt time.Time) string {
+	return version + "\n" + sentAt.UTC().Format(time.RFC3339Nano)
+}
+
+func configRecentlyPublished(entry, version string, now time.Time, interval time.Duration) bool {
+	if interval <= 0 {
+		return false
+	}
+	separator := strings.LastIndexByte(entry, '\n')
+	if separator <= 0 || entry[:separator] != version {
+		return false
+	}
+	sentAt, err := time.Parse(time.RFC3339Nano, entry[separator+1:])
+	if err != nil {
+		return false
+	}
+	elapsed := now.Sub(sentAt)
+	return elapsed >= 0 && elapsed < interval
+}
+
 // SyncEdgeConfig publishes a controller's desired configuration whenever the
 // version it reports differs from the version the farm intends. The message is
-// retained, so a controller that reboots during a server outage still recovers
-// its schedules from the broker.
+// retained and retried on the configured sync cadence until the controller
+// reports that version active.
 func (supervisor *Supervisor) SyncEdgeConfig(ctx context.Context) error {
 	if supervisor.publisher == nil {
 		return nil
@@ -325,15 +346,16 @@ func (supervisor *Supervisor) SyncEdgeConfig(ctx context.Context) error {
 		if device.ActiveConfigVersion == device.DesiredConfigVersion {
 			continue
 		}
+		now := supervisor.now()
 		supervisor.mu.Lock()
-		alreadySent := supervisor.publishedConfig[device.ID] == device.DesiredConfigVersion
+		alreadySent := configRecentlyPublished(supervisor.publishedConfig[device.ID], device.DesiredConfigVersion, now, supervisor.config.ConfigSyncInterval)
 		supervisor.mu.Unlock()
 		if alreadySent {
 			continue
 		}
 		payload, err := json.Marshal(map[string]any{
 			"protocolVersion": 1, "deviceId": device.ID,
-			"configVersion": device.DesiredConfigVersion, "issuedAt": supervisor.now(),
+			"configVersion": device.DesiredConfigVersion, "issuedAt": now,
 			"config": device.DesiredConfig,
 		})
 		if err != nil {
@@ -344,7 +366,7 @@ func (supervisor *Supervisor) SyncEdgeConfig(ctx context.Context) error {
 			continue
 		}
 		supervisor.mu.Lock()
-		supervisor.publishedConfig[device.ID] = device.DesiredConfigVersion
+		supervisor.publishedConfig[device.ID] = configPublishCacheEntry(device.DesiredConfigVersion, now)
 		supervisor.mu.Unlock()
 		supervisor.logger.Info("edge_config_published", "device", device.ID, "version", device.DesiredConfigVersion)
 		supervisor.record(ctx, farm.AuditEntry{
