@@ -11,6 +11,13 @@ ON CONFLICT (id) DO UPDATE
 SET facility_id = EXCLUDED.facility_id, name = EXCLUDED.name,
     type = EXCLUDED.type, status = EXCLUDED.status;
 
+-- name: RetireConflictingDeviceChannelKey :exec
+UPDATE device_channels
+SET key = 'retired:' || id::text || ':' || key
+WHERE facility_id = sqlc.arg(facility_id)
+  AND key = sqlc.arg(key)
+  AND id <> sqlc.arg(id);
+
 -- name: UpsertDeviceChannel :exec
 INSERT INTO device_channels (
   id, facility_id, entity_type, entity_id, key, name, kind, value_type,
