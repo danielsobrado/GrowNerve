@@ -3,6 +3,7 @@ package telemetry
 import (
 	"context"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -29,9 +30,23 @@ func NewMemoryStore(capacity int) *MemoryStore {
 func duplicateKey(measurement Measurement) string {
 	sequence := "-"
 	if measurement.Sequence != nil {
-		sequence = time.Unix(0, *measurement.Sequence).Format(time.RFC3339Nano)
+		sequence = strconv.FormatInt(*measurement.Sequence, 10)
 	}
 	return measurement.ChannelID + "|" + measurement.ObservedAt.UTC().Format(time.RFC3339Nano) + "|" + sequence
+}
+
+func newerMeasurement(left, right Measurement) bool {
+	if !left.ObservedAt.Equal(right.ObservedAt) {
+		return left.ObservedAt.After(right.ObservedAt)
+	}
+	leftSequence, rightSequence := int64(-1), int64(-1)
+	if left.Sequence != nil {
+		leftSequence = *left.Sequence
+	}
+	if right.Sequence != nil {
+		rightSequence = *right.Sequence
+	}
+	return leftSequence > rightSequence
 }
 
 func (store *MemoryStore) Append(_ context.Context, measurements []Measurement) (int, error) {
@@ -54,10 +69,11 @@ func (store *MemoryStore) Append(_ context.Context, measurements []Measurement) 
 		written++
 	}
 	if overflow := len(store.ordered) - store.capacity; overflow > 0 {
-		for _, evicted := range store.ordered[:overflow] {
+		sort.SliceStable(store.ordered, func(i, j int) bool { return newerMeasurement(store.ordered[i], store.ordered[j]) })
+		for _, evicted := range store.ordered[len(store.ordered)-overflow:] {
 			delete(store.byKey, duplicateKey(evicted))
 		}
-		store.ordered = append([]Measurement(nil), store.ordered[overflow:]...)
+		store.ordered = append([]Measurement(nil), store.ordered[:len(store.ordered)-overflow]...)
 	}
 	return written, nil
 }
@@ -76,7 +92,7 @@ func (store *MemoryStore) History(_ context.Context, query Query) ([]Measurement
 		}
 		matched = append(matched, measurement)
 	}
-	sort.Slice(matched, func(i, j int) bool { return matched[i].ObservedAt.After(matched[j].ObservedAt) })
+	sort.SliceStable(matched, func(i, j int) bool { return newerMeasurement(matched[i], matched[j]) })
 	if len(matched) > query.Limit {
 		matched = matched[:query.Limit]
 	}
@@ -122,7 +138,7 @@ func (store *MemoryStore) Latest(_ context.Context) ([]Measurement, error) {
 	defer store.mu.RUnlock()
 	newest := map[string]Measurement{}
 	for _, measurement := range store.ordered {
-		if existing, found := newest[measurement.ChannelID]; found && existing.ObservedAt.After(measurement.ObservedAt) {
+		if existing, found := newest[measurement.ChannelID]; found && !newerMeasurement(measurement, existing) {
 			continue
 		}
 		newest[measurement.ChannelID] = measurement
@@ -160,6 +176,11 @@ func (store *MemoryStore) Recent(_ context.Context, limit int) ([]Measurement, e
 	if limit <= 0 || limit > len(store.ordered) {
 		limit = len(store.ordered)
 	}
-	window := store.ordered[len(store.ordered)-limit:]
-	return append([]Measurement(nil), window...), nil
+	ordered := append([]Measurement(nil), store.ordered...)
+	sort.SliceStable(ordered, func(i, j int) bool { return newerMeasurement(ordered[i], ordered[j]) })
+	ordered = ordered[:limit]
+	for left, right := 0, len(ordered)-1; left < right; left, right = left+1, right-1 {
+		ordered[left], ordered[right] = ordered[right], ordered[left]
+	}
+	return ordered, nil
 }
