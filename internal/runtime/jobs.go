@@ -32,7 +32,17 @@ func (supervisor *Supervisor) SweepCommands(ctx context.Context) error {
 				continue
 			}
 			expiresAt, known := parseTime(command["expires_at"])
-			if !known || !now.After(expiresAt) {
+			if !known {
+				command["status"] = "timed_out"
+				command["updated_at"] = now
+				command["reason_code"] = "COMMAND_EXPIRY_INVALID"
+				if id, ok := command["id"].(string); ok {
+					expired = append(expired, id)
+				}
+				changed = true
+				continue
+			}
+			if expiresAt.After(now) {
 				continue
 			}
 			command["status"] = "timed_out"
@@ -58,7 +68,7 @@ func (supervisor *Supervisor) SweepCommands(ctx context.Context) error {
 		supervisor.logger.Warn("command_timed_out", "command", id)
 		supervisor.record(ctx, farm.AuditEntry{
 			Actor: "system", Action: "command.timed_out", TargetType: "command", TargetID: id,
-			Detail: map[string]any{"reason": "no acknowledgement before expiry"},
+			Detail: map[string]any{"reason": "command expiry reached or was invalid"},
 		})
 	}
 	if len(expired) > 0 {
@@ -150,8 +160,8 @@ func (supervisor *Supervisor) EvaluateAlerts(ctx context.Context) error {
 }
 
 // markStaleDevicesOffline is what makes offline detection work without the
-// device cooperating: liveness is inferred from heartbeat age, not from a
-// device politely announcing that it left.
+// device cooperating: liveness is inferred from server-receipt heartbeat age,
+// not from a device politely announcing that it left.
 func (supervisor *Supervisor) markStaleDevicesOffline(current *document, now time.Time) bool {
 	if supervisor.config.DeviceOfflineAfter <= 0 {
 		return false
@@ -163,8 +173,11 @@ func (supervisor *Supervisor) markStaleDevicesOffline(current *document, now tim
 			continue
 		}
 		heartbeat, known := parseTime(device.LastHeartbeat)
-		if !known || now.Sub(heartbeat) <= supervisor.config.DeviceOfflineAfter {
-			continue
+		if known {
+			age := now.Sub(heartbeat)
+			if age >= 0 && age <= supervisor.config.DeviceOfflineAfter {
+				continue
+			}
 		}
 		device.Online = false
 		changed = true
