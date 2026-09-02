@@ -1,6 +1,6 @@
 # GrowNerve Documentation
 
-This directory is the implementation blueprint for GrowNerve. Documents are ordered so a new contributor can move from product intent to architecture, domain design, edge control, UI, safety, deployment, and implementation work without reverse-engineering assumptions from code.
+This directory is the implementation blueprint for GrowNerve. Documents are ordered so a new contributor can move from product intent to architecture, domain design, edge control, UI, safety, deployment, implementation status, and future extensibility without reverse-engineering assumptions from code.
 
 ## Reading order
 
@@ -32,6 +32,12 @@ This directory is the implementation blueprint for GrowNerve. Documents are orde
 
 The ESP32 controller lives in [`firmware/esp32`](../firmware/esp32/README.md).
 
+## Status versus design documents
+
+`22-implementation-status.md` is authoritative for what the repository actually implements today.
+
+The component registry, third-party component packs, GLB pack storage/import, archive v2, ports/anchors, and MCP server described in documents 24 and 25 are planned work. The current digital twin already works using procedural geometry and profile-based rendering; document 24 describes an incremental migration of that code rather than a parallel replacement application.
+
 ## Runtime modes
 
 GrowNerve deliberately supports two modes from one frontend codebase:
@@ -43,24 +49,28 @@ browser mode  -> IndexedDB + local simulator/imported data
 
 Both expose the same product UI, entity identities, grow-management concepts, history views, alerts, and 3D twin. Browser mode is portable and static-hostable, but it is not considered a safe substitute for unattended physical automation.
 
-## Extensibility model
+## Target extensibility model
 
-GrowNerve's 3D/component ecosystem is deliberately data-driven:
+GrowNerve's 3D/component ecosystem is being designed around a data-driven boundary:
 
 ```text
-component JSON + local assets
-          |
-          v
-   component registry
-          |
-          v
-normalized component/farm state
-      /              \
-     v                v
-Three.js UI       2D/UI/MCP
+component JSON + validated local assets
+                 |
+                 v
+         component registry
+                 |
+                 v
+        normalized scene model
+            /          \
+           v            v
+      Three.js       2D UI / MCP
 ```
 
-Three.js is a renderer, not the component source of truth. Component packs are declarative in V0 and do not execute arbitrary JavaScript. MCP uses the same validated component/farm application services as the normal UI rather than editing Three.js state or registry files directly.
+Three.js remains a renderer, not the component source of truth.
+
+A reusable component definition is separate from a scene binding, but an operational scene binding does **not** get a second identity. It continues to use the existing GrowNerve `(entity_type, entity_id)` UUID pair so 2D/3D selection, alerts, history, and commands remain aligned.
+
+Component packs are declarative in V0 and do not execute arbitrary code. MCP is planned as another adapter over the same validated component/farm services rather than a filesystem editor or Three.js controller.
 
 See `24-component-plugin-system.md` and `25-mcp-component-authoring.md` before implementing extensible 3D assets or AI-assisted scene authoring.
 
@@ -69,18 +79,23 @@ See `24-component-plugin-system.md` and `25-mcp-component-authoring.md` before i
 - Local operation must survive Internet loss.
 - Essential schedules must survive server loss at the edge.
 - Automatic nutrient/pH dosing is not part of the first control release.
-- WebGPU is the preferred 3D rendering path.
+- WebGPU is the preferred 3D rendering path with a supported fallback.
 - The 3D scene is an operational digital twin, not decorative content.
-- 3D/component definitions are renderer-agnostic JSON plus validated local assets; Three.js-specific implementation state is not the portable component contract.
-- Component definitions and placed component instances are separate concepts.
-- Component IDs are stable; schema versions and component SemVer versions are separate.
-- Imported component packs are declarative in V0 and cannot execute arbitrary JavaScript, WebAssembly, shaders, shell commands, or network calls.
-- Components expose logical telemetry/control semantics; protocol-specific MQTT/ESPHome/Home Assistant/Modbus details belong in bindings/adapters, not reusable component definitions.
-- MCP authoring uses the same validation/application-service boundary as human UI/API flows and cannot bypass farm concurrency, authorization, or physical safety rules.
-- Dangerous commands require server-side safety validation in full mode even when initiated from the 3D UI.
+- Operational 3D identity remains `(entity_type, entity_id)`; do not create a parallel component-instance identity for the same farm entity.
+- Reusable component definitions are renderer-agnostic JSON plus validated local assets; Three.js-specific implementation state is not the portable contract.
+- Component IDs are stable; schema versions, component SemVer, and immutable content digests are separate concepts.
+- Farms pin exact component revisions; component upgrades are explicit rather than silent latest-version replacement.
+- Imported component packs are declarative in V0 and cannot execute arbitrary JavaScript, WebAssembly, shader source, shell commands, native code, or network callbacks.
+- Existing logical `Channel` UUIDs remain telemetry/control identities. Components declare compatible channel slots instead of inventing a second telemetry model.
+- Physical/topology ports are distinct from telemetry/control channel bindings.
+- Protocol-specific MQTT/ESPHome/Home Assistant/Modbus details belong in runtime bindings/adapters, not reusable component definitions.
+- Large immutable component assets do not belong in the whole browser `FarmData` snapshot or the versioned server farm document.
+- Current `.grownerve.json` archive schema v1 remains valid; component dependency support must use an explicit v2 migration rather than silently changing v1 semantics.
+- MCP authoring cannot bypass farm compare-and-swap concurrency, authorization, validation, audit, or physical safety rules.
+- Dangerous commands require server-side safety validation in full mode even when initiated from the 3D UI or future MCP tooling.
 - Browser-only mode must clearly identify simulated/non-authoritative control.
 - Telemetry and meaningful farm events are separate data classes.
-- Domain services do not depend directly on HTTP, MQTT, SQL, or Three.js.
+- Domain services do not depend directly on HTTP, MQTT, SQL, MCP, or Three.js.
 - Browser persistence uses IndexedDB, not `localStorage`.
 - Browser exports are versioned and validated before import.
 - Configuration belongs in YAML/environment configuration, not hidden constants in application code.
@@ -92,4 +107,6 @@ See `24-component-plugin-system.md` and `25-mcp-component-authoring.md` before i
 
 ## Reference installation
 
-All V0 decisions should be tested against one real installation: a 3 x 3 ft DWC tent with one LED, circulation fan, air pump, about 30 L of nutrient solution, four plant positions, and ESP32-based telemetry/control. If a feature is not useful there and is not required to keep the architecture extensible, it is probably not V0.
+All V0 decisions should be tested against one real installation: a 3 x 3 ft DWC tent with one LED, circulation fan, air pump, about 30 L of nutrient solution, four plant positions, and ESP32-based telemetry/control.
+
+If a feature is not useful there and is not required to preserve a clear extension boundary, it is probably not V0.
