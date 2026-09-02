@@ -1,9 +1,9 @@
 import type { EntityType, FarmData, Measurement, Quality } from "../domain/model";
 
-const UNIT_LABELS: Record<string, string> = {
-  degC: "°C",
-  "%RH": "% RH",
-  "%": "%",
+const UNIT_SUFFIXES: Record<string, { label: string; compact: boolean }> = {
+  degC: { label: "°C", compact: false },
+  "%RH": { label: "% RH", compact: true },
+  "%": { label: "%", compact: true },
 };
 
 export interface TelemetryReading {
@@ -26,8 +26,11 @@ export interface ReadingQuery {
 const formatNumber = (value: number) => Math.abs(value) >= 100 || Number.isInteger(value) ? value.toFixed(0) : value.toFixed(1);
 
 export const formatTelemetryValue = (value: number, unit?: string) => {
-  const formattedUnit = unit ? UNIT_LABELS[unit] ?? unit : "";
-  return `${formatNumber(value)}${formattedUnit ? ` ${formattedUnit}` : ""}`;
+  const number = formatNumber(value);
+  if (!unit) return number;
+  const suffix = UNIT_SUFFIXES[unit];
+  if (!suffix) return `${number} ${unit}`;
+  return `${number}${suffix.compact ? "" : " "}${suffix.label}`;
 };
 
 export function latestMeasurementsByChannel(data: FarmData): Map<string, Measurement> {
