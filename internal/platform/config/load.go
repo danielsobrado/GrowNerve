@@ -14,6 +14,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+const defaultMaxHeaderBytes = 32 << 10
+const maximumMaxHeaderBytes = 1 << 20
+
 func Load(directory string) (Config, error) {
 	var result Config
 	contents, err := os.ReadFile(filepath.Join(directory, "default.yaml"))
@@ -45,6 +48,13 @@ func applyEnvironment(config *Config) error {
 	text("APP_AUTH__MODE", &config.Auth.Mode)
 	text("APP_AUTH__OIDC__ISSUER", &config.Auth.OIDC.Issuer)
 	text("APP_AUTH__OIDC__AUDIENCE", &config.Auth.OIDC.Audience)
+	if value := strings.TrimSpace(os.Getenv("APP_SERVER__MAX_HEADER_BYTES")); value != "" {
+		parsed, err := strconv.Atoi(value)
+		if err != nil {
+			return fmt.Errorf("APP_SERVER__MAX_HEADER_BYTES must be a whole number: %w", err)
+		}
+		config.Server.MaxHeaderBytes = parsed
+	}
 	if value := strings.TrimSpace(os.Getenv("APP_SERVER__CORS_ALLOWED_ORIGINS")); value != "" {
 		config.Server.CORSAllowedOrigins = splitList(value)
 	}
@@ -93,6 +103,9 @@ func applyDefaults(config *Config) {
 	}
 	if config.Server.ShutdownTimeout == 0 {
 		config.Server.ShutdownTimeout = 10 * time.Second
+	}
+	if config.Server.MaxHeaderBytes == 0 {
+		config.Server.MaxHeaderBytes = defaultMaxHeaderBytes
 	}
 	if config.Telemetry.BatchSize == 0 {
 		config.Telemetry.BatchSize = 200
@@ -153,6 +166,12 @@ func (config Config) Validate() error {
 	}
 	if err := rejectNegativeDuration("server.shutdown_timeout", config.Server.ShutdownTimeout); err != nil {
 		return err
+	}
+	if config.Server.MaxHeaderBytes < 0 {
+		return errors.New("server.max_header_bytes cannot be negative")
+	}
+	if config.Server.MaxHeaderBytes > maximumMaxHeaderBytes {
+		return fmt.Errorf("server.max_header_bytes cannot exceed %d", maximumMaxHeaderBytes)
 	}
 	if strings.TrimSpace(config.Postgres.URLEnv) == "" {
 		return errors.New("postgres.url_env is required")
