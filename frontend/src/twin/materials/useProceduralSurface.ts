@@ -9,9 +9,17 @@ interface PreviousMeshMaterials {
   customDistanceMaterial?: Material;
 }
 
+interface ProceduralSurfaceOptions {
+  resolution: number;
+}
+
 const rendererBackend = (renderer: unknown): ProceduralMaterialBackend => renderer instanceof WebGLRenderer ? "webgl" : "webgpu";
 
-export function useProceduralSurface(meshRef: RefObject<Mesh | null>, recipe: MaterialRecipe): void {
+export function useProceduralSurface(
+  meshRef: RefObject<Mesh | null>,
+  recipe: MaterialRecipe,
+  options: ProceduralSurfaceOptions,
+): void {
   const renderer = useThree((state) => state.gl);
 
   useEffect(() => {
@@ -27,7 +35,7 @@ export function useProceduralSurface(meshRef: RefObject<Mesh | null>, recipe: Ma
       backend: rendererBackend(renderer),
       coordinateSpace: recipe.coordinateSpace,
       textureFieldSource: "generated",
-      generatedTextureFields: { resolution: 128 },
+      generatedTextureFields: { resolution: options.resolution },
     });
     let active = true;
 
@@ -47,5 +55,5 @@ export function useProceduralSurface(meshRef: RefObject<Mesh | null>, recipe: Ma
       }
       procedural.dispose();
     };
-  }, [meshRef, recipe, renderer]);
+  }, [meshRef, options.resolution, recipe, renderer]);
 }
