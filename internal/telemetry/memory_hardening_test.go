@@ -32,6 +32,26 @@ func TestMeasurementRejectsNegativeSequenceAndNonFiniteValue(t *testing.T) {
 	}
 }
 
+func TestMemoryAppendRejectsWholeInvalidBatch(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore(10)
+	base := time.Date(2026, 9, 2, 3, 0, 0, 0, time.UTC)
+	written, err := store.Append(ctx, []Measurement{
+		{ChannelID: "channel", ObservedAt: base, Value: 1, Unit: "u", Quality: QualityGood},
+		{ChannelID: "channel", ObservedAt: base.Add(time.Second), Value: math.NaN(), Unit: "u", Quality: QualityGood},
+	})
+	if err == nil || written != 0 {
+		t.Fatalf("invalid batch = written %d, err %v", written, err)
+	}
+	stored, err := store.Recent(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored) != 0 {
+		t.Fatalf("invalid batch partially persisted: %+v", stored)
+	}
+}
+
 func TestMemoryRecentUsesObservationOrderNotArrivalOrder(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryStore(10)
