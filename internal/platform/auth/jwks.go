@@ -73,7 +73,7 @@ func (authenticator *OIDCAuthenticator) refresh(ctx context.Context) error {
 	if response.StatusCode != http.StatusOK {
 		return fmt.Errorf("identity provider keys returned %d", response.StatusCode)
 	}
-	if err := authenticator.validateFetchedURL(response.Request.URL); err != nil {
+	if err := authenticator.validateFetchedURL(responseURL(response)); err != nil {
 		return err
 	}
 	var document struct {
@@ -119,7 +119,7 @@ func (authenticator *OIDCAuthenticator) discoverJWKS(ctx context.Context) (strin
 	if response.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("identity provider metadata returned %d", response.StatusCode)
 	}
-	if err := authenticator.validateFetchedURL(response.Request.URL); err != nil {
+	if err := authenticator.validateFetchedURL(responseURL(response)); err != nil {
 		return "", err
 	}
 	var metadata struct {
@@ -140,6 +140,13 @@ func (authenticator *OIDCAuthenticator) discoverJWKS(ctx context.Context) (strin
 	authenticator.jwksURI = uri
 	authenticator.mu.Unlock()
 	return uri, nil
+}
+
+func responseURL(response *http.Response) *url.URL {
+	if response == nil || response.Request == nil {
+		return nil
+	}
+	return response.Request.URL
 }
 
 func decodeBoundedJSON(reader io.Reader, maximum int64, target any) error {
