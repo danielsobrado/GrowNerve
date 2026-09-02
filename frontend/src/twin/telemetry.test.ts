@@ -12,11 +12,20 @@ describe("digital twin telemetry presentation", () => {
   it("uses the newest sample and reports freshness", () => {
     const data = pilotData();
     const latest = latestMeasurementsByChannel(data);
-    const fresh = readingByKey(data, latest, "water.temperature", Date.parse("2026-09-01T23:01:30.000Z"));
-    const stale = readingByKey(data, latest, "water.temperature", Date.parse("2026-09-01T23:04:00.000Z"));
+    const fresh = readingByKey(data, latest, "water.temperature", { now: Date.parse("2026-09-01T23:01:30.000Z") });
+    const stale = readingByKey(data, latest, "water.temperature", { now: Date.parse("2026-09-01T23:04:00.000Z") });
 
     expect(fresh?.displayValue).toContain("°C");
     expect(fresh?.stale).toBe(false);
     expect(stale?.stale).toBe(true);
+  });
+
+  it("can scope repeated channel keys to one entity", () => {
+    const data = pilotData();
+    const latest = latestMeasurementsByChannel(data);
+    const reservoir = data.reservoirs[0];
+    const reading = readingByKey(data, latest, "water.level", { entityType: "reservoir", entityId: reservoir.id });
+
+    expect(reading?.label).toBe("Water level");
   });
 });
