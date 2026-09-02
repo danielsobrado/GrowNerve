@@ -127,7 +127,7 @@ func run() error {
 	})
 
 	server := &http.Server{
-		Addr: cfg.Server.Address, Handler: handler,
+		Addr: cfg.Server.Address, Handler: handler, MaxHeaderBytes: cfg.Server.MaxHeaderBytes,
 		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 35 * time.Second,
 		WriteTimeout: 0, IdleTimeout: 90 * time.Second,
 	}
