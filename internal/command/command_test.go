@@ -30,6 +30,23 @@ func TestValidateRejectsUnsafeCommand(t *testing.T) {
 	}
 }
 
+func TestValidateRejectsExcessiveTTL(t *testing.T) {
+	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	context := SafetyContext{
+		Controllable: true,
+		Online:       true,
+		Minimum:      0,
+		Maximum:      100,
+		MaximumTTL:   MaximumTTL,
+	}
+	if err := Validate(Request{Value: 50, ExpiresAt: now.Add(MaximumTTL)}, context, now); err != nil {
+		t.Fatalf("maximum permitted TTL rejected: %v", err)
+	}
+	if err := Validate(Request{Value: 50, ExpiresAt: now.Add(MaximumTTL + time.Second)}, context, now); err == nil || err.Code != "COMMAND_TTL_TOO_LONG" {
+		t.Fatalf("excessive TTL error = %#v", err)
+	}
+}
+
 func TestStateMachineRejectsInvalidTransition(t *testing.T) {
 	command := Command{State: StatePending}
 	if err := command.Transition(StateApplied); err != ErrInvalidTransition {
