@@ -36,8 +36,8 @@ function actionIcon(action: string): ActionIcon {
   }
 }
 
-const readingSummary = (data: FarmData, latest: LatestMeasurements, key: string) => {
-  const reading = readingByKey(data, latest, key);
+const readingSummary = (data: FarmData, latest: LatestMeasurements, key: string, binding: SceneEntity) => {
+  const reading = readingByKey(data, latest, key, { entityType: binding.entity_type, entityId: binding.entity_id });
   return reading ? `${reading.displayValue}${reading.stale ? " · stale" : ""}` : undefined;
 };
 
@@ -54,8 +54,8 @@ function tooltipFor(data: FarmData, latest: LatestMeasurements, binding: SceneEn
   if (binding.entity_type === "reservoir") {
     const reservoir = data.reservoirs.find((entry) => entry.id === binding.entity_id);
     if (reservoir) {
-      const temperature = readingSummary(data, latest, "water.temperature");
-      const level = readingSummary(data, latest, "water.level") ?? `${Math.round(reservoir.level_percent)}% level`;
+      const temperature = readingSummary(data, latest, "water.temperature", binding);
+      const level = readingSummary(data, latest, "water.level", binding) ?? `${Math.round(reservoir.level_percent)}% level`;
       return { title: reservoir.name, detail: [temperature, level].filter(Boolean).join(" · ") };
     }
   }
@@ -68,8 +68,8 @@ function tooltipFor(data: FarmData, latest: LatestMeasurements, binding: SceneEn
   if (binding.entity_type === "zone") {
     const zone = data.zones.find((entry) => entry.id === binding.entity_id);
     if (zone) {
-      const temperature = readingSummary(data, latest, "air.temperature");
-      const humidity = readingSummary(data, latest, "air.humidity");
+      const temperature = readingSummary(data, latest, "air.temperature", binding);
+      const humidity = readingSummary(data, latest, "air.humidity", binding);
       const telemetry = [temperature, humidity].filter(Boolean).join(" · ");
       const positions = data.plant_positions.filter((entry) => entry.zone_id === zone.id).length;
       return { title: zone.name, detail: telemetry || `${zone.type} · ${positions} plant positions` };
@@ -126,7 +126,7 @@ function Scene({ data, latest, selection, onSelect }: { data: FarmData; latest: 
 
 export function DigitalTwin({ data, selection, onSelect, onAction }: { data: FarmData; selection?: Selection; onSelect: (selection: Selection) => void; onAction: (action: string) => void }) {
   const [renderer, setRenderer] = useState<"starting" | "webgpu" | "webgl">("starting");
-  const latest = useMemo(() => latestMeasurementsByChannel(data), [data]);
+  const latest = useMemo(() => latestMeasurementsByChannel(data), [data.measurements]);
   const selectedBinding = selection && data.scene_layouts[0]?.entities.find((entry) => entry.entity_type === selection.type && entry.entity_id === selection.id);
   const selectedTooltip = selectedBinding ? tooltipFor(data, latest, selectedBinding) : undefined;
   const createRenderer = async (options: WebGLRendererParameters) => {
