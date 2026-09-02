@@ -1,5 +1,5 @@
 import { useRef } from "react";
-import type { Mesh } from "three";
+import { DoubleSide, type Mesh } from "three";
 import { GROW_NERVE_PTL_RECIPES } from "./ptlRecipes";
 import { useProceduralSurface } from "./useProceduralSurface";
 
@@ -32,19 +32,18 @@ export function AbsHousing({ geometry = "pot" }: { geometry?: "fan" | "pot" }) {
   </mesh>;
 }
 
-function TentPanel({ position, rotation, scale }: { position: [number, number, number]; rotation?: [number, number, number]; scale: [number, number, number] }) {
+function TentPanel({ position, rotation }: { position: [number, number, number]; rotation?: [number, number, number] }) {
   const mesh = useRef<Mesh>(null);
   useProceduralSurface(mesh, GROW_NERVE_PTL_RECIPES["tent-fabric"]);
-  return <mesh ref={mesh} position={position} rotation={rotation} scale={scale} receiveShadow>
+  return <mesh ref={mesh} position={position} rotation={rotation} receiveShadow>
     <planeGeometry args={[1, 1, 24, 18]} />
-    <meshStandardMaterial color="#111713" roughness={0.9} side={2} />
+    <meshStandardMaterial color="#111713" roughness={0.9} side={DoubleSide} />
   </mesh>;
 }
 
 export function TentShell() {
   return <group>
-    <TentPanel position={[0, 0, -0.5]} scale={[1, 1, 1]} />
-    <TentPanel position={[-0.5, 0, 0]} rotation={[0, Math.PI / 2, 0]} scale={[1, 1, 1]} />
-    <TentPanel position={[0.5, 0, 0]} rotation={[0, -Math.PI / 2, 0]} scale={[1, 1, 1]} />
+    <TentPanel position={[0, 0, -0.5]} />
+    <TentPanel position={[-0.5, 0, 0]} rotation={[0, Math.PI / 2, 0]} />
   </group>;
 }
