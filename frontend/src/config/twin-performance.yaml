@@ -1,0 +1,36 @@
+mobile_max_width: 780
+tablet_max_width: 1080
+low_memory_gb: 4
+low_cpu_cores: 4
+
+desktop_dpr_min: 1
+desktop_dpr_max: 1.75
+desktop_ptl_resolution: 128
+desktop_shadow_map_size: 1024
+desktop_geometry_scale: 1
+desktop_shadows: true
+desktop_antialias: true
+
+tablet_dpr_min: 0.9
+tablet_dpr_max: 1.4
+tablet_ptl_resolution: 96
+tablet_shadow_map_size: 768
+tablet_geometry_scale: 0.85
+tablet_shadows: true
+tablet_antialias: true
+
+mobile_dpr_min: 0.8
+mobile_dpr_max: 1.2
+mobile_ptl_resolution: 96
+mobile_shadow_map_size: 512
+mobile_geometry_scale: 0.72
+mobile_shadows: true
+mobile_antialias: true
+
+low_power_dpr_min: 0.7
+low_power_dpr_max: 1
+low_power_ptl_resolution: 64
+low_power_shadow_map_size: 256
+low_power_geometry_scale: 0.55
+low_power_shadows: false
+low_power_antialias: false
