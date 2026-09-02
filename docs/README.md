@@ -29,6 +29,7 @@ This directory is the implementation blueprint for GrowNerve. Documents are orde
 23. [Development, operations, and commissioning](23-development-and-operations.md)
 24. [Component and plugin system](24-component-plugin-system.md)
 25. [MCP component authoring and farm editing](25-mcp-component-authoring.md)
+26. [Component taxonomy, capabilities, and information surfaces](26-component-taxonomy-and-capabilities.md)
 
 The ESP32 controller lives in [`firmware/esp32`](../firmware/esp32/README.md).
 
@@ -36,7 +37,9 @@ The ESP32 controller lives in [`firmware/esp32`](../firmware/esp32/README.md).
 
 `22-implementation-status.md` is authoritative for what the repository actually implements today.
 
-The component registry, third-party component packs, GLB pack storage/import, archive v2, ports/anchors, and MCP server described in documents 24 and 25 are planned work. The current digital twin already works using procedural geometry and profile-based rendering; document 24 describes an incremental migration of that code rather than a parallel replacement application.
+The component registry, third-party component packs, GLB pack storage/import, archive v2, ports/anchors, richer component taxonomy, and MCP server described in documents 24–26 are planned work. The current digital twin already works using procedural geometry and profile-based rendering; document 24 describes an incremental migration of that code rather than a parallel replacement application.
+
+Document 26 is deliberately broader than the first implementation. It defines the target categories, subtypes, capability families, information surfaces, state vocabulary, physical ports/anchors, and component families so later additions remain coherent. Its implementation order explicitly keeps the first schema small and pilot-driven.
 
 ## Runtime modes
 
@@ -70,9 +73,23 @@ Three.js remains a renderer, not the component source of truth.
 
 A reusable component definition is separate from a scene binding, but an operational scene binding does **not** get a second identity. It continues to use the existing GrowNerve `(entity_type, entity_id)` UUID pair so 2D/3D selection, alerts, history, and commands remain aligned.
 
+The component semantic model separates:
+
+```text
+category     -> human browsing/discovery
+subtype      -> specific component family
+capabilities -> GrowNerve-supported behavior/workflows
+channel slots-> bindings to existing logical Channel UUIDs
+ports        -> physical/topological connections
+anchors      -> placement/snap points
+properties   -> reusable technical characteristics
+```
+
+Tags are discovery metadata only. They never grant behavior, permissions, or safety authority.
+
 Component packs are declarative in V0 and do not execute arbitrary code. MCP is planned as another adapter over the same validated component/farm services rather than a filesystem editor or Three.js controller.
 
-See `24-component-plugin-system.md` and `25-mcp-component-authoring.md` before implementing extensible 3D assets or AI-assisted scene authoring.
+See `24-component-plugin-system.md`, `25-mcp-component-authoring.md`, and `26-component-taxonomy-and-capabilities.md` before implementing extensible 3D assets or AI-assisted scene authoring.
 
 ## Non-negotiable constraints
 
@@ -85,6 +102,9 @@ See `24-component-plugin-system.md` and `25-mcp-component-authoring.md` before i
 - Reusable component definitions are renderer-agnostic JSON plus validated local assets; Three.js-specific implementation state is not the portable contract.
 - Component IDs are stable; schema versions, component SemVer, and immutable content digests are separate concepts.
 - Farms pin exact component revisions; component upgrades are explicit rather than silent latest-version replacement.
+- Categories are for human discovery/default presentation; capabilities and actual domain/channel bindings drive behavior.
+- Tags and third-party metadata cannot grant actions, permissions, automation authority, or safety behavior.
+- Add capabilities only when GrowNerve has a concrete consumer and validation semantics; the broad taxonomy does not require broad V0 implementation.
 - Imported component packs are declarative in V0 and cannot execute arbitrary JavaScript, WebAssembly, shader source, shell commands, native code, or network callbacks.
 - Existing logical `Channel` UUIDs remain telemetry/control identities. Components declare compatible channel slots instead of inventing a second telemetry model.
 - Physical/topology ports are distinct from telemetry/control channel bindings.
