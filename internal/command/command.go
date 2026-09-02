@@ -6,6 +6,8 @@ import (
 	"time"
 )
 
+const MaximumTTL = 5 * time.Minute
+
 type State string
 
 const (
@@ -31,6 +33,7 @@ type SafetyContext struct {
 	EmergencyStop bool
 	Minimum       float64
 	Maximum       float64
+	MaximumTTL    time.Duration
 }
 
 type SafetyError struct {
@@ -52,6 +55,9 @@ func Validate(request Request, context SafetyContext, now time.Time) *SafetyErro
 	}
 	if !request.ExpiresAt.After(now) {
 		return &SafetyError{Code: "COMMAND_EXPIRED", Detail: "the command has expired"}
+	}
+	if context.MaximumTTL > 0 && request.ExpiresAt.After(now.Add(context.MaximumTTL)) {
+		return &SafetyError{Code: "COMMAND_TTL_TOO_LONG", Detail: "the command expiry is too far in the future"}
 	}
 	if request.Value < context.Minimum || request.Value > context.Maximum {
 		return &SafetyError{Code: "COMMAND_VALUE_OUT_OF_RANGE", Detail: "requested value is outside the channel safety limits"}
