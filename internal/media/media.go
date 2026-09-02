@@ -18,6 +18,12 @@ import (
 	"github.com/google/uuid"
 )
 
+const (
+	defaultMaximumBytes = 16 << 20
+	sha256ByteLength     = sha256.Size
+	sha256HexLength      = sha256.Size * 2
+)
+
 // Object is a stored file's metadata.
 type Object struct {
 	ID        string    `json:"id"`
@@ -62,7 +68,7 @@ type FilesystemStore struct {
 
 func NewFilesystemStore(root string, maximumBytes int64) (*FilesystemStore, error) {
 	if maximumBytes <= 0 {
-		maximumBytes = 16 << 20
+		maximumBytes = defaultMaximumBytes
 	}
 	absolute, err := filepath.Abs(root)
 	if err != nil {
@@ -77,11 +83,14 @@ func NewFilesystemStore(root string, maximumBytes int64) (*FilesystemStore, erro
 // Put validates and stores content. The upload is read through a limit so a
 // client cannot exhaust disk by lying about its size, and the type is decided by
 // sniffing the leading bytes rather than by trusting the request.
-func (store *FilesystemStore) Put(_ context.Context, filename string, content io.Reader) (Object, error) {
+func (store *FilesystemStore) Put(ctx context.Context, filename string, content io.Reader) (Object, error) {
 	// One byte beyond the limit is read so an oversized upload is detected
 	// rather than silently truncated.
 	buffered, err := io.ReadAll(io.LimitReader(content, store.maximumBytes+1))
 	if err != nil {
+		return Object{}, err
+	}
+	if err := ctx.Err(); err != nil {
 		return Object{}, err
 	}
 	if int64(len(buffered)) > store.maximumBytes {
@@ -105,7 +114,11 @@ func (store *FilesystemStore) Put(_ context.Context, filename string, content io
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return Object{}, err
 	}
-	if err := os.WriteFile(path, buffered, 0o640); err != nil {
+	if err := writeFileAtomic(path, buffered, 0o640); err != nil {
+		return Object{}, err
+	}
+	if err := ctx.Err(); err != nil {
+		_ = os.Remove(path)
 		return Object{}, err
 	}
 	if err := store.writeMetadata(object, extension); err != nil {
@@ -115,7 +128,10 @@ func (store *FilesystemStore) Put(_ context.Context, filename string, content io
 	return object, nil
 }
 
-func (store *FilesystemStore) Get(_ context.Context, id string) (Object, io.ReadCloser, error) {
+func (store *FilesystemStore) Get(ctx context.Context, id string) (Object, io.ReadCloser, error) {
+	if err := ctx.Err(); err != nil {
+		return Object{}, nil, err
+	}
 	object, extension, err := store.readMetadata(id)
 	if err != nil {
 		return Object{}, nil, err
@@ -124,10 +140,18 @@ func (store *FilesystemStore) Get(_ context.Context, id string) (Object, io.Read
 	if err != nil {
 		return Object{}, nil, ErrNotFound
 	}
+	info, err := file.Stat()
+	if err != nil || info.Size() != object.SizeBytes {
+		_ = file.Close()
+		return Object{}, nil, ErrNotFound
+	}
 	return object, file, nil
 }
 
-func (store *FilesystemStore) Delete(_ context.Context, id string) error {
+func (store *FilesystemStore) Delete(ctx context.Context, id string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	_, extension, err := store.readMetadata(id)
 	if err != nil {
 		return err
@@ -139,6 +163,32 @@ func (store *FilesystemStore) Delete(_ context.Context, id string) error {
 		return err
 	}
 	return nil
+}
+
+func writeFileAtomic(path string, content []byte, mode os.FileMode) error {
+	directory := filepath.Dir(path)
+	temporary, err := os.CreateTemp(directory, ".grownerve-*")
+	if err != nil {
+		return err
+	}
+	temporaryPath := temporary.Name()
+	defer func() {
+		_ = temporary.Close()
+		_ = os.Remove(temporaryPath)
+	}()
+	if err := temporary.Chmod(mode); err != nil {
+		return err
+	}
+	if _, err := temporary.Write(content); err != nil {
+		return err
+	}
+	if err := temporary.Sync(); err != nil {
+		return err
+	}
+	if err := temporary.Close(); err != nil {
+		return err
+	}
+	return os.Rename(temporaryPath, path)
 }
 
 // pathFor builds the storage path from the generated identifier only. The
