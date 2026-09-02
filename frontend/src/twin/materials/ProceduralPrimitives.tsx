@@ -32,6 +32,26 @@ export function AbsHousing({ geometry = "pot" }: { geometry?: "fan" | "pot" }) {
   </mesh>;
 }
 
+export function LedFixture({ running }: { running: boolean }) {
+  const housing = useRef<Mesh>(null);
+  useProceduralSurface(housing, GROW_NERVE_PTL_RECIPES["aluminum-brushed"]);
+  return <group>
+    <mesh ref={housing} castShadow receiveShadow>
+      <boxGeometry args={[1, 1, 1, 12, 2, 8]} />
+      <meshStandardMaterial color="#89928e" metalness={0.76} roughness={0.38} />
+    </mesh>
+    <mesh position={[0, -0.53, 0]} scale={[0.9, 0.05, 0.82]}>
+      <boxGeometry args={[1, 1, 1]} />
+      <meshStandardMaterial
+        color={running ? "#fff0b2" : "#444944"}
+        emissive={running ? "#ffe27d" : "#000000"}
+        emissiveIntensity={running ? 2.1 : 0}
+        roughness={0.28}
+      />
+    </mesh>
+  </group>;
+}
+
 function TentPanel({ position, rotation }: { position: [number, number, number]; rotation?: [number, number, number] }) {
   const mesh = useRef<Mesh>(null);
   useProceduralSurface(mesh, GROW_NERVE_PTL_RECIPES["tent-fabric"]);
