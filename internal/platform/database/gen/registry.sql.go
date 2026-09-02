@@ -22,6 +22,25 @@ func (q *Queries) CountDeviceChannels(ctx context.Context) (int64, error) {
 	return column_1, err
 }
 
+const retireConflictingDeviceChannelKey = `-- name: RetireConflictingDeviceChannelKey :exec
+UPDATE device_channels
+SET key = 'retired:' || id::text || ':' || key
+WHERE facility_id = $1
+  AND key = $2
+  AND id <> $3
+`
+
+type RetireConflictingDeviceChannelKeyParams struct {
+	FacilityID pgtype.UUID `json:"facility_id"`
+	Key        string      `json:"key"`
+	ID         pgtype.UUID `json:"id"`
+}
+
+func (q *Queries) RetireConflictingDeviceChannelKey(ctx context.Context, arg RetireConflictingDeviceChannelKeyParams) error {
+	_, err := q.db.Exec(ctx, retireConflictingDeviceChannelKey, arg.FacilityID, arg.Key, arg.ID)
+	return err
+}
+
 const upsertDevice = `-- name: UpsertDevice :exec
 INSERT INTO devices (id, facility_id, name, type, status)
 VALUES ($1, $2, $3, $4, $5)
