@@ -337,7 +337,8 @@ func (handler *Handler) decideCommand(rawState json.RawMessage, intent commandIn
 		}
 	}
 	var numeric float64
-	if channel.ValueType == "boolean" {
+	switch channel.ValueType {
+	case "boolean":
 		var value bool
 		if json.Unmarshal(intent.Value, &value) != nil {
 			*problem = &problemDetails{http.StatusBadRequest, "INVALID_COMMAND_VALUE", "Boolean channel requires a boolean value"}
@@ -346,8 +347,13 @@ func (handler *Handler) decideCommand(rawState json.RawMessage, intent commandIn
 		if value {
 			numeric = 1
 		}
-	} else if json.Unmarshal(intent.Value, &numeric) != nil {
-		*problem = &problemDetails{http.StatusBadRequest, "INVALID_COMMAND_VALUE", "Numeric channel requires a number"}
+	case "number":
+		if json.Unmarshal(intent.Value, &numeric) != nil {
+			*problem = &problemDetails{http.StatusBadRequest, "INVALID_COMMAND_VALUE", "Numeric channel requires a number"}
+			return nil, false
+		}
+	default:
+		*problem = &problemDetails{http.StatusUnprocessableEntity, "UNSUPPORTED_COMMAND_CHANNEL", "Target channel value type is not supported for physical commands"}
 		return nil, false
 	}
 	minimum, maximum := -1e12, 1e12
@@ -364,7 +370,10 @@ func (handler *Handler) decideCommand(rawState json.RawMessage, intent commandIn
 	}
 	safetyError := commanddomain.Validate(
 		commanddomain.Request{Value: numeric, ExpiresAt: expiresAt},
-		commanddomain.SafetyContext{Controllable: channel.Kind == "command", Online: online, Minimum: minimum, Maximum: maximum},
+		commanddomain.SafetyContext{
+			Controllable: channel.Kind == "command", Online: online, Minimum: minimum, Maximum: maximum,
+			MaximumTTL: commanddomain.MaximumTTL,
+		},
 		now,
 	)
 	status, reasonCode := "pending", ""
