@@ -7,7 +7,7 @@ import {
   type SynthesisSettings,
 } from "@drusniel/ptl-runtime";
 
-export type GrowNerveMaterialKey = "abs-dark" | "concrete-sealed" | "hdpe-reservoir" | "tent-fabric";
+export type GrowNerveMaterialKey = "abs-dark" | "aluminum-brushed" | "concrete-sealed" | "hdpe-reservoir" | "tent-fabric";
 
 const SYNTHESIS: SynthesisSettings = {
   age: 0.08,
@@ -119,6 +119,26 @@ export const GROW_NERVE_PTL_RECIPES: Record<GrowNerveMaterialKey, MaterialRecipe
       displacement: 0.002,
     }),
   ]),
+  "aluminum-brushed": recipe(35119, {
+    roughness: 0.34,
+    metalness: 0.84,
+    clearcoat: 0.08,
+    clearcoatRoughness: 0.24,
+    specularIntensity: 0.72,
+  }, [
+    layer("aluminum-base", "Anodized aluminum", "base", { colorA: "#67716d", colorB: "#a7b0ac", roughness: -0.08 }),
+    layer("aluminum-brush", "Brushed grain", "ridges", {
+      blendMode: "overlay",
+      opacity: 0.22,
+      scale: 17,
+      strength: 0.34,
+      seed: 37,
+      colorA: "#4d5753",
+      colorB: "#c0c8c4",
+      roughness: 0.07,
+      displacement: 0.001,
+    }),
+  ], { variation: 0.12 }, "world"),
   "concrete-sealed": recipe(90817, {
     roughness: 0.82,
     clearcoat: 0.02,
