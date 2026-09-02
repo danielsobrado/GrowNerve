@@ -16,6 +16,7 @@ type Config struct {
 type Server struct {
 	Address            string        `yaml:"address"`
 	ShutdownTimeout    time.Duration `yaml:"shutdown_timeout"`
+	MaxHeaderBytes     int           `yaml:"max_header_bytes"`
 	CORSAllowedOrigins []string      `yaml:"cors_allowed_origins"`
 	TrustedProxyCIDRs  []string      `yaml:"trusted_proxy_cidrs"`
 	RateLimit          RateLimit     `yaml:"rate_limit"`
