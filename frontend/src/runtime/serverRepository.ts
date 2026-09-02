@@ -2,6 +2,9 @@ import { emptyFarmData, type FarmCommand, type FarmData, type Measurement } from
 import type { CommandIntent } from "./simulator";
 import type { FarmRepository } from "./browserRepository";
 
+const COMMAND_TRANSPORT_ATTEMPTS = 2;
+const FARM_VERSION_HEADER = "X-Farm-Version";
+
 export interface MeasurementBucket {
   started_at: string;
   average: number;
@@ -28,12 +31,14 @@ export interface ServerRepositoryOptions {
 export class ServerFarmRepository implements FarmRepository {
   private readonly listeners = new Set<() => void>();
   private readonly options: ServerRepositoryOptions;
+  private readonly baseURL: string;
   private version?: string;
   private streamAbort?: AbortController;
   private reconnectTimer?: ReturnType<typeof setTimeout>;
   private unauthorizedHandled = false;
 
-  constructor(private readonly baseURL = "http://127.0.0.1:8080", options: ServerRepositoryOptions = {}) {
+  constructor(baseURL = "http://127.0.0.1:8080", options: ServerRepositoryOptions = {}) {
+    this.baseURL = baseURL.replace(/\/+$/, "");
     this.options = { reconnectDelay: 3000, ...options };
   }
 
@@ -69,6 +74,14 @@ export class ServerFarmRepository implements FarmRepository {
     return new Error(`${fallback}: ${response.status}`);
   }
 
+  private farmVersion(response: Response): string {
+    const version = response.headers.get(FARM_VERSION_HEADER)?.trim();
+    if (!version || !/^\d+$/.test(version)) {
+      throw new Error("Server response did not include a valid farm version; state was not considered safe to edit");
+    }
+    return version;
+  }
+
   async load(): Promise<FarmData | undefined> {
     const response = await fetch(`${this.baseURL}/api/v1/state`, { headers: this.headers() });
     if (response.status === 204) {
@@ -77,19 +90,19 @@ export class ServerFarmRepository implements FarmRepository {
     }
     if (!response.ok) throw await this.failure(response, "Server state failed");
     this.unauthorizedHandled = false;
-    this.version = response.headers.get("X-Farm-Version") ?? undefined;
+    this.version = this.farmVersion(response);
     return await response.json() as FarmData;
   }
 
   async replace(data: FarmData): Promise<void> {
     const headers = this.headers({ "Content-Type": "application/json" });
-    if (this.version) headers["X-Farm-Version"] = this.version;
+    if (this.version) headers[FARM_VERSION_HEADER] = this.version;
     else headers["If-None-Match"] = "*";
     const response = await fetch(`${this.baseURL}/api/v1/state`, { method: "PUT", headers, body: JSON.stringify(data) });
     if (response.status === 409 || response.status === 428) throw new Error("Farm state changed on the server; reload before saving");
     if (!response.ok) throw await this.failure(response, "Server state save failed");
     this.unauthorizedHandled = false;
-    this.version = response.headers.get("X-Farm-Version") ?? undefined;
+    this.version = this.farmVersion(response);
     this.emit();
   }
 
@@ -105,11 +118,26 @@ export class ServerFarmRepository implements FarmRepository {
   async clear(): Promise<void> { await this.replace(emptyFarmData()); }
 
   async issueCommand(intent: CommandIntent): Promise<FarmCommand> {
-    const response = await fetch(`${this.baseURL}/api/v1/commands`, {
+    const idempotencyKey = crypto.randomUUID();
+    const request: RequestInit = {
       method: "POST",
-      headers: this.headers({ "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID() }),
+      headers: this.headers({ "Content-Type": "application/json", "Idempotency-Key": idempotencyKey }),
       body: JSON.stringify({ targetChannelId: intent.targetChannelId, value: intent.value, reason: intent.reason }),
-    });
+    };
+
+    let response: Response | undefined;
+    let transportError: unknown;
+    for (let attempt = 0; attempt < COMMAND_TRANSPORT_ATTEMPTS; attempt += 1) {
+      try {
+        response = await fetch(`${this.baseURL}/api/v1/commands`, request);
+        break;
+      } catch (error) {
+        transportError = error;
+      }
+    }
+    if (!response) {
+      throw transportError instanceof Error ? transportError : new Error("Command request could not reach the server");
+    }
     if (!response.ok && response.status !== 422) throw await this.failure(response, "Command failed");
     this.unauthorizedHandled = false;
     this.emit();
@@ -192,7 +220,10 @@ export class ServerFarmRepository implements FarmRepository {
     if (this.listeners.size === 0 || this.unauthorizedHandled) return;
     this.emit();
     console.warn("GrowNerve live updates interrupted; reconnecting", error);
-    this.reconnectTimer = setTimeout(() => this.openStream(), this.options.reconnectDelay);
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = undefined;
+      this.openStream();
+    }, this.options.reconnectDelay);
   }
 
   private closeStream(): void {
