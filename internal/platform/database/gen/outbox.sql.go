@@ -24,6 +24,8 @@ func (q *Queries) DeletePublishedOutboxMessagesBefore(ctx context.Context, cutof
 const enqueueOutboxMessage = `-- name: EnqueueOutboxMessage :one
 INSERT INTO outbox_messages (topic, message_key, payload)
 VALUES ($1, $2, $3)
+ON CONFLICT (topic, message_key) DO UPDATE
+SET payload = outbox_messages.payload
 RETURNING id
 `
 
