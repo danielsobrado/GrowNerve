@@ -11,9 +11,10 @@ describe("GrowNerve PTL material recipes", () => {
     }
   });
 
-  it("keeps floor materials world-aligned and equipment materials object-aligned", () => {
+  it("keeps scaled fixed surfaces world-aligned and small equipment object-aligned", () => {
     expect(GROW_NERVE_PTL_RECIPES["concrete-sealed"].coordinateSpace).toBe("world");
-    expect(GROW_NERVE_PTL_RECIPES["hdpe-reservoir"].coordinateSpace).toBe("object");
+    expect(GROW_NERVE_PTL_RECIPES["hdpe-reservoir"].coordinateSpace).toBe("world");
+    expect(GROW_NERVE_PTL_RECIPES["tent-fabric"].coordinateSpace).toBe("world");
     expect(GROW_NERVE_PTL_RECIPES["abs-dark"].coordinateSpace).toBe("object");
   });
 });
