@@ -41,12 +41,15 @@ Current behavior:
 - WebGPU renderer attempted first, explicit WebGL fallback
 - `SceneLayout`/`SceneEntity` stored inside `FarmData`
 - scene selection keyed by `(entity_type, entity_id)`
-- procedural pilot geometry
-- profile-based rendering for `zone`, `reservoir`, `light`, `fan`, and `plant`
+- detailed procedural pilot geometry: leaf rosettes and net baskets, framed reflective tent, reinforced DWC reservoir, LED bars, guarded fan, controller, and air pump
+- profile-based rendering for `zone`, `reservoir`, `light`, `fan`, `plant`, `controller`, and `air_pump`
+- optional reservoir cutaway showing fill level, two air stones, hoses, and illustrative roots under occupied positions
 - profile-based radial actions
 - HTML tooltip overlays
 - fan animation, light state, reservoir level, and plant-health visuals
 - shared selection between the normal UI and twin
+
+The built-in model sources and asset notes are in [`frontend/src/twin/models`](../frontend/src/twin/models/README.md). Repeated hardware uses instancing; foliage detail follows the existing device quality profile. Saved pilot layouts gain missing controller/pump visuals using the existing device identities without rewriting farm data. Explicit device placements take precedence.
 
 This is intentionally described as implemented. Component packs, component registry persistence, GLB pack import, topology ports, and MCP authoring are **not implemented yet**.
 

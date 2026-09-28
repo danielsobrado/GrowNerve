@@ -48,7 +48,7 @@ export function useProceduralSurface(
 
     return () => {
       active = false;
-      if (meshRef.current === mesh && mesh.material === procedural.material) {
+      if (mesh.material === procedural.material) {
         mesh.material = previous.material;
         mesh.customDepthMaterial = previous.customDepthMaterial;
         mesh.customDistanceMaterial = previous.customDistanceMaterial;

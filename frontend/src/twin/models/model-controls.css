@@ -1,0 +1,24 @@
+.gn-cutaway-toggle {
+  position: absolute;
+  top: 54px;
+  left: 16px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 8px 11px;
+  border: 1px solid #72897055;
+  border-radius: 8px;
+  background: #14231de8;
+  color: #d5e2cf;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  backdrop-filter: blur(10px);
+}
+.gn-cutaway-toggle:hover,
+.gn-cutaway-toggle[aria-pressed="true"] { background: #2d4534; border-color: #a0bb8c; }
+.gn-cutaway-toggle:focus-visible { outline: 2px solid #c3e1a6; outline-offset: 3px; }
+@media (pointer: coarse) { .gn-cutaway-toggle { min-height: 44px; } }
+@media (max-width: 780px) { .gn-cutaway-toggle { top: 142px; left: 10px; } }

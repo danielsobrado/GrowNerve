@@ -1,7 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { selectTwinPerformanceProfile } from "./performance";
+import { selectTwinPerformanceProfile, TWIN_PERFORMANCE_CONFIG } from "./performance";
+import { ProceduralMaterial } from "@drusniel/ptl-runtime";
+import { GROW_NERVE_PTL_RECIPES } from "./materials/ptlRecipes";
 
 describe("selectTwinPerformanceProfile", () => {
+  it("uses texture resolutions accepted by the material runtime on every device", () => {
+    for (const profile of Object.values(TWIN_PERFORMANCE_CONFIG.profiles)) {
+      const material = new ProceduralMaterial(GROW_NERVE_PTL_RECIPES["hdpe-reservoir"], {
+        backend: "webgl", textureFieldSource: "generated",
+        generatedTextureFields: { resolution: profile.ptlResolution },
+      });
+      material.dispose();
+    }
+  });
   it("uses the full desktop profile for capable wide displays", () => {
     const profile = selectTwinPerformanceProfile({
       width: 1440,
@@ -28,7 +39,7 @@ describe("selectTwinPerformanceProfile", () => {
 
     expect(profile.name).toBe("mobile");
     expect(profile.dpr[1]).toBe(1.2);
-    expect(profile.ptlResolution).toBe(96);
+    expect(profile.ptlResolution).toBe(64);
     expect(profile.touchOptimized).toBe(true);
   });
 

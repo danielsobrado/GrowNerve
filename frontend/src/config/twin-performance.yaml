@@ -13,7 +13,7 @@ desktop_antialias: true
 
 tablet_dpr_min: 0.9
 tablet_dpr_max: 1.4
-tablet_ptl_resolution: 96
+tablet_ptl_resolution: 128
 tablet_shadow_map_size: 768
 tablet_geometry_scale: 0.85
 tablet_shadows: true
@@ -21,7 +21,7 @@ tablet_antialias: true
 
 mobile_dpr_min: 0.8
 mobile_dpr_max: 1.2
-mobile_ptl_resolution: 96
+mobile_ptl_resolution: 64
 mobile_shadow_map_size: 512
 mobile_geometry_scale: 0.72
 mobile_shadows: true

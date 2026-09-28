@@ -1,17 +1,19 @@
 import { Html, OrbitControls } from "@react-three/drei";
-import { Canvas, useFrame } from "@react-three/fiber";
+import { Canvas } from "@react-three/fiber";
 import {
   AlertTriangle, Camera, CircleEllipsis, ClipboardPlus, Droplets, Eye, FlaskConical,
   Gauge, History, Plus, Power, Scissors, Settings, SlidersHorizontal, Wrench,
 } from "lucide-react";
-import { useCallback, useMemo, useRef, useState, type ComponentType } from "react";
-import { WebGLRenderer, type Group, type WebGLRendererParameters } from "three";
+import { useCallback, useMemo, useState, type ComponentType } from "react";
+import { ACESFilmicToneMapping, WebGLRenderer, type WebGLRendererParameters } from "three";
 import type { EntityType, FarmData, SceneEntity } from "../domain/model";
-import { AbsHousing, LedFixture, ProceduralFloor, ReservoirBody, TentShell } from "./materials/ProceduralPrimitives";
+import { ProceduralFloor } from "./materials/ProceduralPrimitives";
+import { AirPump, CirculationFan, Controller, DwcReservoir, GrowLight, GrowTent, LettucePlant } from "./models/GrowModels";
 import { type TwinPerformanceProfile, useTwinPerformanceProfile } from "./performance";
-import { actionsForProfile, entityKey } from "./sceneState";
+import { actionsForProfile, entityKey, sceneBindings } from "./sceneState";
 import { latestMeasurementsByChannel, readingByKey } from "./telemetry";
 import { TwinHud } from "./TwinHud";
+import "./models/model-controls.css";
 
 export interface Selection { type: EntityType; id: string }
 
@@ -37,8 +39,6 @@ function actionIcon(action: string): ActionIcon {
     default: return CircleEllipsis;
   }
 }
-
-const detail = (base: number, scale: number, minimum: number): number => Math.max(minimum, Math.round(base * scale));
 
 const readingSummary = (data: FarmData, latest: LatestMeasurements, key: string, binding: SceneEntity) => {
   const reading = readingByKey(data, latest, key, { entityType: binding.entity_type, entityId: binding.entity_id });
@@ -92,25 +92,15 @@ function Selectable({ binding, selected, onSelect, title, detail, children }: { 
   </group>;
 }
 
-function Fan({ quality, running }: { quality: TwinPerformanceProfile; running: boolean }) {
-  const blades = useRef<Group>(null);
-  useFrame((_, delta) => { if (running && blades.current) blades.current.rotation.z -= delta * 8; });
-  return <group rotation={[0, Math.PI / 2, 0]}><AbsHousing quality={quality} geometry="fan" /><group ref={blades} position={[0, 0.13, 0]}>{[0, 1, 2, 3].map((blade) => <mesh key={blade} rotation={[Math.PI / 2, 0, blade * Math.PI / 2]} position={[0.23 * Math.cos(blade * Math.PI / 2), 0, 0.23 * Math.sin(blade * Math.PI / 2)]} castShadow={quality.shadows}><boxGeometry args={[0.42, 0.09, 0.12]} /><meshStandardMaterial color="#84a98c" roughness={0.62} /></mesh>)}</group></group>;
-}
-
-function Plant({ attention, quality }: { attention: boolean; quality: TwinPerformanceProfile }) {
-  const widthSegments = detail(20, quality.geometryScale, 10);
-  const heightSegments = detail(12, quality.geometryScale, 6);
-  return <group><group position={[0, -0.35, 0]}><AbsHousing quality={quality} /></group>{[-0.25, 0, 0.25].map((offset, index) => <mesh key={offset} position={[offset, 0.02 + index * 0.08, 0]} rotation={[0.2, offset * 2, offset]} castShadow={quality.shadows}><sphereGeometry args={[0.32, widthSegments, heightSegments]} /><meshStandardMaterial color={attention ? "#d9a441" : index === 1 ? "#5b9a62" : "#70b870"} roughness={0.8} /></mesh>)}</group>;
-}
-
-function Scene({ data, latest, quality, selection, onSelect }: { data: FarmData; latest: LatestMeasurements; quality: TwinPerformanceProfile; selection?: Selection; onSelect: (selection: Selection) => void }) {
+function Scene({ data, latest, quality, selection, onSelect, cutaway }: { data: FarmData; latest: LatestMeasurements; quality: TwinPerformanceProfile; selection?: Selection; onSelect: (selection: Selection) => void; cutaway: boolean }) {
   const layout = data.scene_layouts[0];
   if (!layout) return null;
   const device = (binding: SceneEntity) => data.devices.find((entry) => entry.id === binding.entity_id);
   return <>
-    <color attach="background" args={["#080d0a"]} />
-    <ambientLight intensity={1.1} />
+    <color attach="background" args={["#101b16"]} />
+    <ambientLight intensity={0.45} />
+    <hemisphereLight args={["#e7efd8", "#283c30", 1.1]} />
+    <directionalLight position={[-4, 4, -2]} intensity={1.2} color="#c5e0df" />
     <directionalLight
       position={[5, 7, 4]}
       intensity={2.5}
@@ -118,20 +108,32 @@ function Scene({ data, latest, quality, selection, onSelect }: { data: FarmData;
       castShadow={quality.shadows}
       shadow-mapSize-width={quality.shadowMapSize}
       shadow-mapSize-height={quality.shadowMapSize}
+      shadow-normalBias={0.035}
+      shadow-camera-left={-5}
+      shadow-camera-right={5}
+      shadow-camera-top={5}
+      shadow-camera-bottom={-5}
+      shadow-camera-far={20}
     />
-    <pointLight position={[0, 3.5, 0]} intensity={data.devices.find((entry) => entry.type === "light")?.state ? 18 : 0} color="#fff1b8" />
+    <pointLight position={[0, 2.65, 0]} intensity={data.devices.find((entry) => entry.type === "light")?.state ? 7 : 0} color="#fff1d2" />
     <ProceduralFloor quality={quality} />
     <gridHelper args={[12, quality.name === "low-power" ? 12 : 24, "#294235", "#16221b"]} position={[0, 0.005, 0]} />
-    {layout.entities.map((binding) => {
+    {sceneBindings(data).map((binding, index) => {
       const key = entityKey(binding.entity_type, binding.entity_id), selected = selection && entityKey(selection.type, selection.id) === key;
       const equipment = device(binding), tooltip = tooltipFor(data, latest, binding);
       const reservoir = binding.entity_type === "reservoir" ? data.reservoirs.find((entry) => entry.id === binding.entity_id) : undefined;
+      const plant = binding.entity_type === "plant_position" ? data.plant_positions.find((entry) => entry.id === binding.entity_id) : undefined;
       return <Selectable key={key} binding={binding} selected={Boolean(selected)} onSelect={onSelect} title={tooltip.title} detail={tooltip.detail}>
-        {binding.profile === "zone" && <group><TentShell quality={quality} /><mesh><boxGeometry args={[1, 1, 1]} /><meshStandardMaterial color="#41614b" transparent opacity={0.16} wireframe /></mesh></group>}
-        {binding.profile === "reservoir" && <group><ReservoirBody quality={quality} /><mesh position={[0, (reservoir?.level_percent ?? 0) / 100 - 0.5, 0]} scale={[0.94, 0.04, 0.94]}><boxGeometry args={[1, 1, 1]} /><meshStandardMaterial color="#4bb2c9" transparent opacity={0.76} roughness={0.18} /></mesh></group>}
-        {binding.profile === "light" && <LedFixture quality={quality} running={Boolean(equipment?.state)} />}
-        {binding.profile === "fan" && <Fan quality={quality} running={Boolean(equipment?.state)} />}
-        {binding.profile === "plant" && <Plant quality={quality} attention={data.plant_positions.find((entry) => entry.id === binding.entity_id)?.health === "attention"} />}
+        {binding.profile === "zone" && <GrowTent quality={quality} />}
+        {binding.profile === "reservoir" && <DwcReservoir quality={quality} level={reservoir?.level_percent ?? 0} cutaway={cutaway} rootPositions={layout.entities
+          .filter((entry) => entry.profile === "plant" && data.plant_positions.some((position) => position.id === entry.entity_id && position.occupied && position.zone_id === reservoir?.zone_id))
+          .map((entry): [number, number] => [(entry.position[0] - binding.position[0]) / binding.scale[0], (entry.position[2] - binding.position[2]) / binding.scale[2]])
+          .filter(([x, z]) => Math.abs(x) < 0.46 && Math.abs(z) < 0.46)} />}
+        {binding.profile === "light" && <GrowLight quality={quality} running={Boolean(equipment?.state)} />}
+        {binding.profile === "fan" && <CirculationFan quality={quality} running={Boolean(equipment?.state)} output={equipment?.output_percent} />}
+        {binding.profile === "plant" && <LettucePlant quality={quality} attention={plant?.health === "attention"} occupied={Boolean(plant?.occupied)} seed={index} />}
+        {binding.profile === "controller" && <Controller online={Boolean(equipment?.online)} />}
+        {binding.profile === "air_pump" && <AirPump running={Boolean(equipment?.state)} />}
       </Selectable>;
     })}
     <OrbitControls makeDefault minDistance={4} maxDistance={18} maxPolarAngle={Math.PI / 2.05} target={[0, 1.1, 0]} />
@@ -140,9 +142,10 @@ function Scene({ data, latest, quality, selection, onSelect }: { data: FarmData;
 
 export function DigitalTwin({ data, selection, onSelect, onAction }: { data: FarmData; selection?: Selection; onSelect: (selection: Selection) => void; onAction: (action: string) => void }) {
   const [renderer, setRenderer] = useState<"starting" | "webgpu" | "webgl">("starting");
+  const [cutaway, setCutaway] = useState(false);
   const quality = useTwinPerformanceProfile();
   const latest = useMemo(() => latestMeasurementsByChannel(data), [data]);
-  const selectedBinding = selection && data.scene_layouts[0]?.entities.find((entry) => entry.entity_type === selection.type && entry.entity_id === selection.id);
+  const selectedBinding = selection && sceneBindings(data).find((entry) => entry.entity_type === selection.type && entry.entity_id === selection.id);
   const selectedTooltip = selectedBinding ? tooltipFor(data, latest, selectedBinding) : undefined;
   const createRenderer = useCallback(async (options: WebGLRendererParameters) => {
     if (typeof navigator !== "undefined" && "gpu" in navigator) {
@@ -150,6 +153,7 @@ export function DigitalTwin({ data, selection, onSelect, onAction }: { data: Far
         const { WebGPURenderer } = await import("three/webgpu");
         const webgpu = new WebGPURenderer({ canvas: options.canvas as HTMLCanvasElement, antialias: quality.antialias });
         await webgpu.init();
+        webgpu.toneMapping = ACESFilmicToneMapping;
         setRenderer("webgpu");
         return webgpu;
       } catch {
@@ -157,15 +161,18 @@ export function DigitalTwin({ data, selection, onSelect, onAction }: { data: Far
       }
     }
     setRenderer("webgl");
-    return new WebGLRenderer({ ...options, antialias: quality.antialias });
+    const webgl = new WebGLRenderer({ ...options, antialias: quality.antialias });
+    webgl.toneMapping = ACESFilmicToneMapping;
+    return webgl;
   }, [quality.antialias]);
   const rendererLabel = renderer === "webgpu" ? "WebGPU + PTL" : renderer === "webgl" ? "WebGL + PTL" : "Starting renderer";
   const help = quality.touchOptimized ? "Drag to orbit · Pinch to zoom · Tap an object to inspect" : "Drag to orbit · Scroll to zoom · Click an object to inspect";
   return <div className="gn-twin-wrap">
     <Canvas shadows={quality.shadows} gl={createRenderer} camera={{ position: data.scene_layouts[0]?.camera_position ?? [7, 6, 8], fov: 42 }} dpr={quality.dpr}>
-      <Scene data={data} latest={latest} quality={quality} selection={selection} onSelect={onSelect} />
+      <Scene data={data} latest={latest} quality={quality} selection={selection} onSelect={onSelect} cutaway={cutaway} />
     </Canvas>
     <div className="gn-renderer-badge"><span />{rendererLabel} · {quality.name}</div>
+    <button className="gn-cutaway-toggle" aria-pressed={cutaway} onClick={() => setCutaway((value) => !value)}><Eye size={14} />{cutaway ? "Close reservoir" : "Look inside reservoir"}</button>
     <TwinHud data={data} />
     <div className="gn-scene-help">{help}</div>
     {selectedBinding && selectedTooltip && <div className="gn-context-panel">
