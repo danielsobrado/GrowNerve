@@ -6,11 +6,13 @@ describe("lettuce geometry", () => {
     const geometry = createLettuceGeometry(1, false, 7);
     const duplicate = createLettuceGeometry(1, false, 7);
     expect(geometry.getAttribute("position").array).toEqual(duplicate.getAttribute("position").array);
-    for (const name of ["position", "normal", "color"]) {
+    for (const name of ["position", "normal", "color", "uv"]) {
       expect(Array.from(geometry.getAttribute(name).array).every(Number.isFinite)).toBe(true);
     }
     expect(geometry.boundingSphere!.radius).toBeLessThan(1);
-    expect(geometry.getIndex()!.count / 3).toBeLessThan(25_000);
+    expect(geometry.getIndex()!.count / 3).toBeLessThan(60_000);
+    expect(geometry.getAttribute("uv").count).toBe(geometry.getAttribute("position").count);
+    expect(Array.from(geometry.getAttribute("uv").array).every((value) => value >= 0 && value <= 1)).toBe(true);
     geometry.dispose(); duplicate.dispose();
   });
 

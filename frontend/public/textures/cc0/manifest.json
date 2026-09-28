@@ -1,0 +1,207 @@
+{
+  "provider": "ambientCG / Lennart Demes",
+  "licenseUrl": "https://docs.ambientcg.com/license/",
+  "processing": "1K source maps resized and JPEG encoded; OpenGL normals kept in linear color space.",
+  "assets": [
+    {
+      "key": "metal",
+      "asset": "Metal032",
+      "source": "https://ambientcg.com/a/Metal032",
+      "download": "https://ambientcg.com/get?file=Metal032_1K-JPG.zip",
+      "license": "CC0-1.0",
+      "archiveSha256": "9e4f363905a647958c273154fa125d2a6440892d0e583f9b3af24bb08b5afc3c",
+      "files": [
+        {
+          "file": "metal/color-512.jpg",
+          "bytes": 8880,
+          "sha256": "f6c3dee7b9d2a1d8ef799fb699342ba74893c0a986b840c86f136002536e0cdb"
+        },
+        {
+          "file": "metal/color-1024.jpg",
+          "bytes": 66996,
+          "sha256": "9b5404863b7f52659e2d2313a2b434cf830f152d546bf749d166997d63853fb4"
+        },
+        {
+          "file": "metal/normalgl-512.jpg",
+          "bytes": 3379,
+          "sha256": "29af6d56ec14e5b8f767a8c2efda9a92ffeeb70be25e48e27ee696bdf950caf9"
+        },
+        {
+          "file": "metal/normalgl-1024.jpg",
+          "bytes": 13423,
+          "sha256": "41c741a371a55d1bc9f80fc2e8f6a54054d332fa9cbbcb13990b6fd4b3f6a9cb"
+        },
+        {
+          "file": "metal/roughness-512.jpg",
+          "bytes": 12237,
+          "sha256": "e0c972adb19f22416eaea74a9a561c3ac3d8b21340b0110a19831e35f4e12bc5"
+        },
+        {
+          "file": "metal/roughness-1024.jpg",
+          "bytes": 73888,
+          "sha256": "4c45456352d383c82e98a4e8e99e72a50c35d2999774d2221b275a5cbfd31db0"
+        }
+      ]
+    },
+    {
+      "key": "plastic",
+      "asset": "Plastic010",
+      "source": "https://ambientcg.com/a/Plastic010",
+      "download": "https://ambientcg.com/get?file=Plastic010_1K-JPG.zip",
+      "license": "CC0-1.0",
+      "archiveSha256": "46a2504dbef278475b85c846713804a36823c7151cb79c90728d5c6eab283a19",
+      "files": [
+        {
+          "file": "plastic/color-512.jpg",
+          "bytes": 3995,
+          "sha256": "063a95d15a539a1e3bddc726105c7595bd010ddbad61d9f2137bcf1ee4765765"
+        },
+        {
+          "file": "plastic/color-1024.jpg",
+          "bytes": 15845,
+          "sha256": "f58129c58caa7715834eaa52dfa6a6ea5335c470c617176632667a89b95ce060"
+        },
+        {
+          "file": "plastic/normalgl-512.jpg",
+          "bytes": 4004,
+          "sha256": "66c14a7884e549c6284edda99ded29563cd9f26bdf7df59c690c16f4763015a5"
+        },
+        {
+          "file": "plastic/normalgl-1024.jpg",
+          "bytes": 23866,
+          "sha256": "933ae47e0db2f12005fd508551ac870f5293d38af7cfe6116a3b4e6c76648358"
+        },
+        {
+          "file": "plastic/roughness-512.jpg",
+          "bytes": 36666,
+          "sha256": "82309cefb89609ce36f78ad807c8afa02888fdd8b7351e7d6a4c91153dc47942"
+        },
+        {
+          "file": "plastic/roughness-1024.jpg",
+          "bytes": 139535,
+          "sha256": "cae061d214357438e00c9511023bdf0e5f7307ed572f66915acb50cafa580d32"
+        }
+      ]
+    },
+    {
+      "key": "fabric",
+      "asset": "Fabric005",
+      "source": "https://ambientcg.com/a/Fabric005",
+      "download": "https://ambientcg.com/get?file=Fabric005_1K-JPG.zip",
+      "license": "CC0-1.0",
+      "archiveSha256": "4b84ca0633a3e778ae323df9d779f6c37abdf200cbc551c5a0ce2c88d7d483eb",
+      "files": [
+        {
+          "file": "fabric/color-512.jpg",
+          "bytes": 139864,
+          "sha256": "ad9821b0177f28511f3ab55dbd5da50c167996622aaabed6e64aabb52052ffde"
+        },
+        {
+          "file": "fabric/color-1024.jpg",
+          "bytes": 546933,
+          "sha256": "b357ab9924285202c2be5d92607fac3121cc73b21089e6c8ed6a171372d00056"
+        },
+        {
+          "file": "fabric/normalgl-512.jpg",
+          "bytes": 179942,
+          "sha256": "2a115c1382e7733676d728fee8ed6d30aabb8c211cd2160f84e9acc264766cc0"
+        },
+        {
+          "file": "fabric/normalgl-1024.jpg",
+          "bytes": 931977,
+          "sha256": "75e9df025d61550ae930de3b96e62bbfb24e4d64fbd8eded0dde763460fc1d05"
+        },
+        {
+          "file": "fabric/roughness-512.jpg",
+          "bytes": 84684,
+          "sha256": "d4b72fac2a2b784bcea0412426c733a8a6e8aa64e915950bf2b4606eb054bedf"
+        },
+        {
+          "file": "fabric/roughness-1024.jpg",
+          "bytes": 309301,
+          "sha256": "af822d7d5e2419e26ac7b231d9b558b0cc89e7826eed573f2e39b277deb8917b"
+        }
+      ]
+    },
+    {
+      "key": "concrete",
+      "asset": "Concrete034",
+      "source": "https://ambientcg.com/a/Concrete034",
+      "download": "https://ambientcg.com/get?file=Concrete034_1K-JPG.zip",
+      "license": "CC0-1.0",
+      "archiveSha256": "5839d284d94ffb8d2a56df742ec522b13dd311c52dbd42b8fd33f0409ceedb81",
+      "files": [
+        {
+          "file": "concrete/color-512.jpg",
+          "bytes": 33814,
+          "sha256": "aeac6cfcc9c61ffc9b8249d5191c8cf01db8dfe7672d7eddda964614b9360545"
+        },
+        {
+          "file": "concrete/color-1024.jpg",
+          "bytes": 130304,
+          "sha256": "29c72de81d54b802ffd9831fa1d2b338376b5d28977f9d5888ee60b9353a4f0c"
+        },
+        {
+          "file": "concrete/normalgl-512.jpg",
+          "bytes": 97458,
+          "sha256": "85efd726bfc2f52cc0f3eca83d4faf55899bb4e1bc14233b5a7f163aa838a749"
+        },
+        {
+          "file": "concrete/normalgl-1024.jpg",
+          "bytes": 346404,
+          "sha256": "ac195ffcd759a0f50fddf5cdb99a4cb64694a10339bcce72a0c5d0d1dad2fca4"
+        },
+        {
+          "file": "concrete/roughness-512.jpg",
+          "bytes": 33508,
+          "sha256": "326bdc93cdde6469f56c695d2a6fda05441bb4e4c93e7694c90a48484b5f2576"
+        },
+        {
+          "file": "concrete/roughness-1024.jpg",
+          "bytes": 99125,
+          "sha256": "1d8e03245d89725bd99381e616efb94343996ff659b9807c0ef4fda718672429"
+        }
+      ]
+    },
+    {
+      "key": "leaf",
+      "asset": "LeafSet001",
+      "source": "https://ambientcg.com/a/LeafSet001",
+      "download": "https://ambientcg.com/get?file=LeafSet001_1K-JPG.zip",
+      "license": "CC0-1.0",
+      "archiveSha256": "8ed9935aa00f0d0a1b8671db4406e424fb4b41f1d2f290971d14968280a52199",
+      "files": [
+        {
+          "file": "leaf/color-512.jpg",
+          "bytes": 19395,
+          "sha256": "b3f22d5096eed99775f648534b727485f989cfe6fa703e8dd0431c59aea68687"
+        },
+        {
+          "file": "leaf/color-1024.jpg",
+          "bytes": 67290,
+          "sha256": "5856994924b08c2fad45442d0717ec38d64ba94e4bc53d74095ae38e45763b21"
+        },
+        {
+          "file": "leaf/normalgl-512.jpg",
+          "bytes": 27185,
+          "sha256": "62acff5b2f8e01c3c90c0b32cbb2c07a224ba50ac48f8b0864a629cceac558cf"
+        },
+        {
+          "file": "leaf/normalgl-1024.jpg",
+          "bytes": 101688,
+          "sha256": "4826c701d34d4d70087e80dc65fb7b1dd2fcbd2ec294d156b4b513e7809ac05f"
+        },
+        {
+          "file": "leaf/roughness-512.jpg",
+          "bytes": 13484,
+          "sha256": "a2fbd5fdf5bbc8ec24d6889e54fd6bddaa789921562277851d7f444f7a27595d"
+        },
+        {
+          "file": "leaf/roughness-1024.jpg",
+          "bytes": 42333,
+          "sha256": "71070f58c2e79ece0679e47a54fea6a9bbfbd55650d572456a9144e1386465fe"
+        }
+      ]
+    }
+  ]
+}

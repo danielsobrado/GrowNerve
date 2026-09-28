@@ -1,9 +1,10 @@
 import { useFrame } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
-import { DoubleSide, type Group, type Mesh } from "three";
+import { DoubleSide, ExtrudeGeometry, Shape, type Group } from "three";
+import { RoundedBox } from "@react-three/drei";
 import type { TwinPerformanceProfile } from "../performance";
-import { GROW_NERVE_PTL_RECIPES } from "../materials/ptlRecipes";
-import { useProceduralSurface } from "../materials/useProceduralSurface";
+import { CC0Material } from "../materials/CC0Material";
+import { Fasteners, RootBundle, TentLining, HoseCollar } from "./FineDetails";
 import { createLettuceGeometry } from "./lettuceGeometry";
 import { Batch, Casing, Ring, Tube, type Instance } from "./Parts";
 
@@ -23,19 +24,17 @@ export function LettucePlant({ quality, attention, occupied, seed }: QualityProp
     return { position: [Math.sin(angle) * radius, -0.112 + (i % 3) * 0.008, Math.cos(angle) * radius], scale: [0.038, 0.027, 0.035] };
   }), [quality.name]);
   return <group>
-    <Batch items={slots} color="#17231c" shadows={quality.shadows} />
+    <Batch items={slots} color="#17231c" surface="plastic" shadows={quality.shadows} />
     {[-0.12, -0.25, -0.34].map((y) => <Ring key={y} radius={y === -0.34 ? 0.17 : 0.2} tube={0.018} position={[0, y, 0]} rotation={[Math.PI / 2, 0, 0]} color="#1c2c22" metalness={0} />)}
     <mesh position={[0, -0.14, 0]}><cylinderGeometry args={[0.19, 0.17, 0.045, 24]} /><meshStandardMaterial color="#443328" roughness={1} /></mesh>
-    <Batch items={clay} color="#916140" sphere />
+    <Batch items={clay} color="#a47851" surface="concrete" sphere />
     {occupied && <mesh geometry={geometry} castShadow={quality.shadows}>
-      <meshStandardMaterial vertexColors side={DoubleSide} roughness={0.68} metalness={0} />
+      <CC0Material surface="leaf" vertexColors roughness={0.88} grain={0.65} sheen={0.22} sheenColor="#b5d89b" clearcoat={0.05} />
     </mesh>}
   </group>;
 }
 
 export function GrowTent({ quality }: QualityProps) {
-  const back = useRef<Mesh>(null);
-  useProceduralSurface(back, GROW_NERVE_PTL_RECIPES["tent-fabric"], { resolution: quality.ptlResolution });
   const posts = useMemo<Instance[]>(() => [-0.495, 0.495].flatMap((x) => [-0.495, 0.495].map((z) => ({ position: [x, 0, z], scale: [0.012, 1.03, 0.012] }))), []);
   const rails = useMemo<Instance[]>(() => [-0.49, 0.5].flatMap((y) => [
     { position: [0, y, -0.495], scale: [1, 0.014, 0.014] }, { position: [0, y, 0.495], scale: [1, 0.014, 0.014] },
@@ -46,14 +45,14 @@ export function GrowTent({ quality }: QualityProps) {
     position: [-0.455 + (i % 12) * 0.082, -0.455 + Math.floor(i / 12) * 0.074, -0.48], scale: [0.043, 0.002, 0.001], rotation: [0, 0, Math.PI / 4],
   })), [quality.name]);
   return <group>
-    <mesh ref={back} position={[0, 0, -0.499]} receiveShadow><boxGeometry args={[1, 1, 0.008, 12, 12, 1]} /><meshStandardMaterial color="#1b251f" /></mesh>
-    <mesh position={[0, 0, -0.49]} receiveShadow><planeGeometry args={[0.975, 0.98]} /><meshStandardMaterial color="#89978f" metalness={0.62} roughness={0.48} side={DoubleSide} /></mesh>
-    <mesh position={[-0.499, 0, 0]} rotation={[0, Math.PI / 2, 0]} receiveShadow><planeGeometry args={[1, 1]} /><meshStandardMaterial color="#68786e" metalness={0.45} roughness={0.58} side={DoubleSide} /></mesh>
-    <Batch items={posts} color="#a2aea4" metalness={0.8} shadows={quality.shadows} />
-    <Batch items={rails} color="#74847a" metalness={0.8} shadows={quality.shadows} />
+    <mesh position={[0, 0, -0.499]} receiveShadow><boxGeometry args={[1, 1, 0.008]} /><CC0Material surface="fabric" albedo={false} color="#18221c" repeat={[5, 5]} grain={0.65} roughness={0.95} /></mesh>
+    <TentLining quality={quality} position={[0, 0, -0.487]} />
+    <TentLining quality={quality} position={[-0.494, 0, 0]} rotation={[0, Math.PI / 2, 0]} />
+    <Batch items={posts} surface="metal" color="#d3d9d2" metalness={0.8} shadows={quality.shadows} />
+    <Batch items={rails} surface="metal" color="#c0cbc2" metalness={0.8} shadows={quality.shadows} />
     <Batch items={seams} color="#485c50" />
     {diamonds.length > 0 && <Batch items={diamonds} color="#a4b0a5" metalness={0.55} />}
-    <mesh position={[0, -0.485, 0]} receiveShadow><boxGeometry args={[0.98, 0.025, 0.98]} /><meshStandardMaterial color="#283b30" roughness={0.64} /></mesh>
+    <mesh position={[0, -0.485, 0]} receiveShadow><boxGeometry args={[0.98, 0.025, 0.98]} /><CC0Material surface="fabric" albedo={false} repeat={[4, 4]} color="#283b30" roughness={0.8} grain={0.4} /></mesh>
     {[-0.49, 0.49].flatMap((x) => [-0.49, 0.49].map((z) => <mesh key={`${x}:${z}`} position={[x, 0.5, z]}><boxGeometry args={[0.036, 0.028, 0.036]} /><meshStandardMaterial color="#202f25" roughness={0.56} /></mesh>))}
     {[-0.25, 0.25].map((x) => <mesh key={x} position={[x, 0.505, 0]}><boxGeometry args={[0.009, 0.01, 0.98]} /><meshStandardMaterial color="#a4b0a7" metalness={0.8} roughness={0.3} /></mesh>)}
     <group position={[-0.26, 0.29, -0.477]}>
@@ -69,17 +68,16 @@ export function GrowTent({ quality }: QualityProps) {
 
 export function DwcReservoir({ quality, level, cutaway = false, rootPositions = [] }: QualityProps & { level: number; cutaway?: boolean; rootPositions?: [number, number][] }) {
   const fill = Math.max(0, Math.min(1, level / 100));
-  const body = useRef<Mesh>(null);
-  useProceduralSurface(body, GROW_NERVE_PTL_RECIPES["hdpe-reservoir"], { resolution: quality.ptlResolution });
   const ribs = useMemo<Instance[]>(() => [-1, 1].flatMap((side) => range(7).map((i) => ({ position: [side * 0.486, -0.04, -0.39 + i * 0.13], scale: [0.023, 0.7, 0.018] }))), []);
   return <group>
-    <mesh ref={body} visible={!cutaway} position={[0, -0.045, 0]} castShadow={quality.shadows} receiveShadow><boxGeometry args={[0.96, 0.87, 0.94, 8, 4, 8]} /><meshStandardMaterial color="#3c5146" roughness={0.76} /></mesh>
+    <RoundedBox args={[0.96, 0.87, 0.94]} radius={0.035} smoothness={5} visible={!cutaway} position={[0, -0.045, 0]} castShadow={quality.shadows} receiveShadow><CC0Material surface="plastic" color="#3c5146" repeat={[2, 2]} grain={0.38} roughness={0.8} /></RoundedBox>
     <group visible={!cutaway}><Casing size={[1.04, 0.085, 1.04]} position={[0, 0.435, 0]} color="#809187" radius={0.02} /></group>
     {[-1, 1].map((side) => <group key={`gasket:${side}`}>
       <Casing size={[1.065, 0.028, 0.018]} position={[0, 0.382, side * 0.523]} color="#1d3025" radius={0.006} />
       <Casing size={[0.018, 0.028, 1.03]} position={[side * 0.523, 0.382, 0]} color="#1d3025" radius={0.006} />
     </group>)}
     <Batch items={ribs} color="#4b6153" />
+    <Fasteners positions={[-0.46, 0.46].flatMap((x) => [-0.4, 0, 0.4].map((z): [number, number, number] => [x, 0.48, z]))} radius={0.01} rotation={[-Math.PI / 2, 0, 0]} />
     <Casing size={[0.97, 0.04, 0.98]} position={[0, -0.465, 0]} color="#243b2c" radius={0.015} />
     {[-1, 1].map((side) => <group key={side} position={[side * 0.505, 0.19, 0]}>
       <Casing size={[0.035, 0.09, 0.28]} radius={0.012} color="#17291e" />
@@ -106,18 +104,12 @@ export function DwcReservoir({ quality, level, cutaway = false, rootPositions = 
         <mesh position={[x, -0.38, 0]} rotation={[0, 0, Math.PI / 2]}><cylinderGeometry args={[0.038, 0.038, 0.22, 20]} /><meshStandardMaterial color="#a5ada3" roughness={0.98} /></mesh>
         <Tube points={[[0.44, 0.44, -0.25], [0.4, 0.12, -0.35], [x + 0.15, -0.32, -0.2], [x + 0.12, -0.38, 0]]} radius={0.006} color="#bdc8ae" />
       </group>)}
-      {rootPositions.flatMap(([x, z]) => range(5).map((i) => <Tube key={`${x}:${z}:${i}`} radius={0.0025} color={i % 2 ? "#d3caa4" : "#ece0bb"} segments={16} points={[
-        [x + (i - 2) * 0.008, 0.4, z], [x + Math.sin(i) * 0.022, 0.19, z + Math.cos(i) * 0.015],
-        [x + Math.sin(i + 1) * 0.035, -0.02 - i * 0.015, z + Math.cos(i + 1) * 0.032],
-        [x + Math.sin(i + 2) * 0.035, -0.15 - i * 0.027, z + Math.cos(i + 2) * 0.05],
-      ]} />))}
+      {rootPositions.map(([x, z], index) => <RootBundle key={`${x}:${z}`} position={[x, 0.4, z]} seed={index} quality={quality} />)}
     </group>}
   </group>;
 }
 
 export function GrowLight({ quality, running }: QualityProps & { running: boolean }) {
-  const housing = useRef<Mesh>(null);
-  useProceduralSurface(housing, GROW_NERVE_PTL_RECIPES["aluminum-brushed"], { resolution: quality.ptlResolution });
   const bars = useMemo<Instance[]>(() => range(6).map((i) => ({ position: [0, -0.25, (i - 2.5) * 0.165], scale: [1, 0.48, 0.095] })), []);
   const fins = useMemo<Instance[]>(() => range(14).map((i) => ({ position: [(i - 6.5) * 0.069, 0.13, 0], scale: [0.008, 0.22, 0.93] })), []);
   const diodes = useMemo<Instance[]>(() => range(quality.name === "low-power" ? 48 : 144).map((i) => {
@@ -125,9 +117,10 @@ export function GrowLight({ quality, running }: QualityProps & { running: boolea
     return { position: [(i % columns) / (columns - 1) * 0.92 - 0.46, -0.505, (Math.floor(i / columns) - 2.5) * 0.165], scale: [0.018, 0.025, 0.028] };
   }), [quality.name]);
   return <group position={[0, -2, 0]}>
-    <mesh ref={housing} castShadow={quality.shadows}><boxGeometry args={[1.04, 0.1, 1.01, 8, 1, 8]} /><meshStandardMaterial color="#9eafa6" metalness={0.8} roughness={0.33} /></mesh>
+    <RoundedBox args={[1.04, 0.1, 1.01]} radius={0.018} smoothness={4} castShadow={quality.shadows}><CC0Material surface="metal" color="#d5dfd8" metalness={0.82} roughness={0.42} repeat={[2, 1]} grain={0.35} /></RoundedBox>
     <Batch items={bars} color="#c4c9aa" metalness={0.45} shadows={quality.shadows} />
-    <Batch items={fins} color="#76877e" metalness={0.82} />
+    <Batch items={fins} surface="metal" color="#b5c5bb" metalness={0.82} />
+    <Fasteners positions={[-0.49, 0.49].flatMap((x) => [-0.46, 0.46].map((z): [number, number, number] => [x, 0.065, z]))} radius={0.011} rotation={[-Math.PI / 2, 0, 0]} />
     <Batch items={diodes} color={running ? "#fff3cb" : "#d5c6a3"} emissive="#ffe6ac" intensity={running ? 4 : 0} roughness={0.27} />
     <Casing size={[0.36, 0.62, 0.26]} position={[0, 0.51, 0]} radius={0.025} color="#43564b" metalness={0.65} />
     <Batch color="#182e23" items={range(9).map((i) => ({ position: [(i - 4) * 0.032, 0.835, 0], scale: [0.012, 0.02, 0.22] }))} />
@@ -138,6 +131,15 @@ export function GrowLight({ quality, running }: QualityProps & { running: boolea
 
 export function CirculationFan({ quality, running, output = 100 }: QualityProps & { running: boolean; output?: number }) {
   const rotor = useRef<Group>(null);
+  const blade = useMemo(() => {
+    const shape = new Shape();
+    shape.moveTo(0.06, 0.08);
+    shape.bezierCurveTo(0.2, 0.1, 0.48, 0.13, 0.42, 0.34);
+    shape.bezierCurveTo(0.34, 0.52, 0.12, 0.44, 0.08, 0.2);
+    shape.closePath();
+    return new ExtrudeGeometry(shape, { depth: 0.025, bevelEnabled: true, bevelSize: 0.006, bevelThickness: 0.006, bevelSegments: 3, steps: 1, curveSegments: 18 });
+  }, []);
+  useEffect(() => () => blade.dispose(), [blade]);
   useFrame((_, delta) => { if (running && rotor.current) rotor.current.rotation.z -= Math.min(delta, 0.05) * 14 * Math.max(0, Math.min(1, output / 100)); });
   const spokes = useMemo<Instance[]>(() => range(12).map((i) => ({ position: [0, 0, 0.165], rotation: [0, 0, i * Math.PI / 6], scale: [1.1, 0.012, 0.014] })), []);
   return <group rotation={[0, 0.7, 0]}>
@@ -147,9 +149,10 @@ export function CirculationFan({ quality, running, output = 100 }: QualityProps 
     <Ring radius={0.59} tube={0.044} color="#344d3c" />
     <Ring radius={0.57} tube={0.025} position={[0, 0, -0.12]} color="#5a7060" />
     <group ref={rotor}>
-      {[0, 1, 2, 3, 4].map((i) => <group key={i} rotation={[0, 0, i * Math.PI * 2 / 5]}><mesh position={[0.13, 0.29, 0.02]} rotation={[0.18, -0.3, -0.4]} scale={[0.17, 0.3, 0.025]} castShadow={quality.shadows}><sphereGeometry args={[1, 16, 10]} /><meshStandardMaterial color="#849980" metalness={0.25} roughness={0.42} /></mesh></group>)}
+      {[0, 1, 2, 3, 4].map((i) => <group key={i} rotation={[0, 0, i * Math.PI * 2 / 5]}><mesh geometry={blade} rotation={[0.18, -0.1, 0]} castShadow={quality.shadows}><CC0Material surface="plastic" color="#91a68c" roughness={0.5} /></mesh></group>)}
     </group>
-    {[0.2, 0.31, 0.42, 0.53].map((radius) => <Ring key={radius} radius={radius} tube={0.009} position={[0, 0, 0.17 + (0.53 - radius) * 0.11]} color="#9bad99" segments={quality.name === "low-power" ? 24 : 48} />)}
+    {[0.18, 0.23, 0.28, 0.33, 0.38, 0.43, 0.48, 0.53].map((radius) => <Ring key={radius} radius={radius} tube={0.006} position={[0, 0, 0.17 + (0.53 - radius) * 0.11]} color="#9bad99" segments={quality.name === "low-power" ? 32 : 64} />)}
+    <Fasteners positions={[-1, 1].flatMap((x) => [-1, 1].map((y): [number, number, number] => [x * 0.395, y * 0.395, 0.06]))} radius={0.022} />
     <Batch items={spokes} color="#8fa38e" metalness={0.75} />
     <mesh position={[0, 0, 0.21]} rotation={[Math.PI / 2, 0, 0]}><cylinderGeometry args={[0.13, 0.13, 0.07, 24]} /><meshStandardMaterial color="#314c39" metalness={0.3} roughness={0.4} /></mesh>
     <mesh position={[0, 0, 0.253]}><circleGeometry args={[0.057, 24]} /><meshStandardMaterial color="#b6c597" metalness={0.65} roughness={0.3} /></mesh>
@@ -164,9 +167,10 @@ export function Controller({ online }: { online: boolean }) {
     <mesh position={[-0.2, 0.25, 0.235]}><planeGeometry args={[0.035, 0.05]} /><meshStandardMaterial color={online ? "#b3e2a0" : "#586255"} emissive={online ? "#8dca81" : "#000000"} emissiveIntensity={0.6} /></mesh>
     <Batch color="#476452" items={range(6).map((i) => ({ position: [0.02, 0.29 - i * 0.027, 0.235], scale: [i % 2 ? 0.22 : 0.32, 0.008, 0.003] }))} />
     <Batch color="#738773" items={range(8).map((i) => ({ position: [-0.245 + i * 0.07, -0.19, 0.208], scale: [0.024, 0.17, 0.012] }))} />
-    <Batch sphere color="#657968" metalness={0.8} items={[-1, 1].flatMap((x) => [-1, 1].map((y) => ({ position: [x * 0.32, y * 0.46, 0.212], scale: [0.025, 0.025, 0.012] })))} />
+    <Fasteners positions={[-1, 1].flatMap((x) => [-1, 1].map((y): [number, number, number] => [x * 0.32, y * 0.46, 0.212]))} radius={0.025} />
     {[-0.25, 0, 0.25].map((x) => <group key={x}>
       <mesh position={[x, -0.62, 0]}><cylinderGeometry args={[0.055, 0.043, 0.14, 12]} /><meshStandardMaterial color="#263b2e" roughness={0.5} /></mesh>
+      <HoseCollar position={[x, -0.62, 0]} radius={0.047} />
       <Tube points={[[x, -0.68, 0], [x, -0.91, 0], [x + 0.1, -1.04, -0.1], [0.42, -1.12, -0.19]]} radius={0.018} />
     </group>)}
     <Tube points={[[0.42, -1.12, -0.19], [0.58, -0.75, -0.19], [0.68, 0.05, -0.12], [0.83, 0.1, 0]]} radius={0.014} color="#8a9c82" />
@@ -183,6 +187,7 @@ export function AirPump({ running }: { running: boolean }) {
     <Batch color="#1d3224" sphere items={[-1, 1].flatMap((x) => [-1, 1].map((z) => ({ position: [x * 0.32, -0.255, z * 0.18], scale: [0.09, 0.07, 0.08] })))} />
     <mesh position={[0.32, 0.21, 0.14]} rotation={[-Math.PI / 2, 0, 0]}><circleGeometry args={[0.035, 16]} /><meshStandardMaterial color={running ? "#a9d68c" : "#485143"} emissive={running ? "#7bad65" : "#000000"} emissiveIntensity={0.7} /></mesh>
     {[-0.16, 0.16].map((x) => <group key={x}>
+      <HoseCollar position={[x, -0.02, 0.37]} radius={0.04} rotation={[Math.PI / 2, 0, 0]} />
       <Tube points={[[x, -0.02, 0.3], [x, -0.02, 0.43], [x - 0.2, -0.22, 0.62], [-0.7, -0.23, 0.72 + x]]} radius={0.028} color="#9bae92" />
       <mesh position={[x, -0.02, 0.33]} rotation={[Math.PI / 2, 0, 0]}><cylinderGeometry args={[0.045, 0.045, 0.12, 12]} /><meshStandardMaterial color="#b3b294" metalness={0.7} roughness={0.38} /></mesh>
     </group>)}

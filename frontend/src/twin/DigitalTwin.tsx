@@ -7,7 +7,7 @@ import {
 import { useCallback, useMemo, useState, type ComponentType } from "react";
 import { ACESFilmicToneMapping, WebGLRenderer, type WebGLRendererParameters } from "three";
 import type { EntityType, FarmData, SceneEntity } from "../domain/model";
-import { ProceduralFloor } from "./materials/ProceduralPrimitives";
+import { CC0Material, TextureResolution } from "./materials/CC0Material";
 import { AirPump, CirculationFan, Controller, DwcReservoir, GrowLight, GrowTent, LettucePlant } from "./models/GrowModels";
 import { type TwinPerformanceProfile, useTwinPerformanceProfile } from "./performance";
 import { actionsForProfile, entityKey, sceneBindings } from "./sceneState";
@@ -116,8 +116,7 @@ function Scene({ data, latest, quality, selection, onSelect, cutaway }: { data: 
       shadow-camera-far={20}
     />
     <pointLight position={[0, 2.65, 0]} intensity={data.devices.find((entry) => entry.type === "light")?.state ? 7 : 0} color="#fff1d2" />
-    <ProceduralFloor quality={quality} />
-    <gridHelper args={[12, quality.name === "low-power" ? 12 : 24, "#294235", "#16221b"]} position={[0, 0.005, 0]} />
+    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.035, 0]} receiveShadow><planeGeometry args={[12, 12]} /><CC0Material surface="concrete" repeat={[6, 6]} color="#5b655f" roughness={0.92} grain={0.5} /></mesh>
     {sceneBindings(data).map((binding, index) => {
       const key = entityKey(binding.entity_type, binding.entity_id), selected = selection && entityKey(selection.type, selection.id) === key;
       const equipment = device(binding), tooltip = tooltipFor(data, latest, binding);
@@ -136,7 +135,7 @@ function Scene({ data, latest, quality, selection, onSelect, cutaway }: { data: 
         {binding.profile === "air_pump" && <AirPump running={Boolean(equipment?.state)} />}
       </Selectable>;
     })}
-    <OrbitControls makeDefault minDistance={4} maxDistance={18} maxPolarAngle={Math.PI / 2.05} target={[0, 1.1, 0]} />
+    <OrbitControls makeDefault minDistance={2.5} maxDistance={18} maxPolarAngle={Math.PI / 2.05} target={[0, 1.1, 0]} />
   </>;
 }
 
@@ -165,11 +164,13 @@ export function DigitalTwin({ data, selection, onSelect, onAction }: { data: Far
     webgl.toneMapping = ACESFilmicToneMapping;
     return webgl;
   }, [quality.antialias]);
-  const rendererLabel = renderer === "webgpu" ? "WebGPU + PTL" : renderer === "webgl" ? "WebGL + PTL" : "Starting renderer";
+  const rendererLabel = renderer === "webgpu" ? "WebGPU · CC0 materials" : renderer === "webgl" ? "WebGL · CC0 materials" : "Starting renderer";
   const help = quality.touchOptimized ? "Drag to orbit · Pinch to zoom · Tap an object to inspect" : "Drag to orbit · Scroll to zoom · Click an object to inspect";
   return <div className="gn-twin-wrap">
     <Canvas shadows={quality.shadows} gl={createRenderer} camera={{ position: data.scene_layouts[0]?.camera_position ?? [7, 6, 8], fov: 42 }} dpr={quality.dpr}>
-      <Scene data={data} latest={latest} quality={quality} selection={selection} onSelect={onSelect} cutaway={cutaway} />
+      <TextureResolution.Provider value={quality.name === "desktop" ? 1024 : 512}>
+        <Scene data={data} latest={latest} quality={quality} selection={selection} onSelect={onSelect} cutaway={cutaway} />
+      </TextureResolution.Provider>
     </Canvas>
     <div className="gn-renderer-badge"><span />{rendererLabel} · {quality.name}</div>
     <button className="gn-cutaway-toggle" aria-pressed={cutaway} onClick={() => setCutaway((value) => !value)}><Eye size={14} />{cutaway ? "Close reservoir" : "Look inside reservoir"}</button>
