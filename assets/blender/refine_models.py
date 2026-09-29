@@ -37,7 +37,8 @@ def write_geometry_glb(name, objects):
         mesh.calc_loop_triangles()
         uv = mesh.uv_layers.active
         color = mesh.color_attributes.active_color
-        vertices, normals, uvs, colors, indices, lookup = [], [], [], [], [], {}
+        vertices, normals, uvs, colors, indices, lookup, source_vertices = [], [], [], [], [], {}, []
+        source_map=obj.get('source_vertices')
         for tri in mesh.loop_triangles:
             for li in tri.loops:
                 vi = mesh.loops[li].vertex_index
@@ -52,9 +53,11 @@ def write_geometry_glb(name, objects):
                     normals.extend((normal.x,normal.z,-normal.y))
                     uvs.extend((tex[0],1-tex[1]))
                     if rgba: colors.extend(rgba)
+                    if source_map is not None: source_vertices.append(source_map[vi])
                 indices.append(lookup[signature])
         attributes={'POSITION':accessor(vertices,3),'NORMAL':accessor(normals,3),'TEXCOORD_0':accessor(uvs,2)}
         if colors: attributes['COLOR_0']=accessor(colors,4)
+        if source_vertices: attributes['_SOURCE_VERTEX']=accessor(source_vertices,1)
         idx = len(doc['meshes'])
         doc['meshes'].append({'name':key,'primitives':[{'attributes':attributes,'indices':accessor(indices,1,True)}]})
         doc['nodes'].append({'name':key,'mesh':idx,'extras':{'geometryKey':key}})
@@ -106,8 +109,10 @@ def refine(name):
                 x,y,z=struct.unpack_from('<fff',raw,start+j*view.get('byteStride',12))
                 tree.insert((x,-z,y),j)
             tree.balance()
+            source_vertices=[]
             for v in mesh.vertices:
                 _,source_index,_=tree.find(v.co)
+                source_vertices.append(source_index)
                 leaf=source_index//925; row=(source_index%925)//25; column=source_index%25
                 t=row/36; u=column/24*2-1; edge=abs(u); p=leaf/31
                 angle=leaf*2.399963
@@ -118,11 +123,12 @@ def refine(name):
                 frill=(math.sin(t*34+leaf*1.3+u*3)*0.018+math.sin(t*58-leaf)*0.005)*edge**2.4*math.sin(math.pi*t)
                 rib=0.014*math.exp(-u*u*90)*math.sin(math.pi*t)
                 secondary=0.005*math.cos((t-edge*.2)*math.pi*18)*math.sin(math.pi*t)*(1-edge)
-                v.co.z+=frill+rib+secondary+0.028*u*math.sin(t*math.pi)*math.sin(leaf*1.9)-p*0.16*math.sin(t*math.pi*.7)
+                v.co.z=-.1+math.sin(t*math.pi*.7)*(.25+.25*p)+edge*edge*math.sin(math.pi*t)*.065+frill+rib+secondary+.018*u*math.sin(t*math.pi)*math.sin(leaf*1.9)
                 lx*=1.08+0.1*math.sin(leaf*3.7)*t+0.035*math.sin(t*31+leaf)*edge**3
                 lz*=1+0.055*math.sin(leaf*2.1)
                 v.co.x=lx*math.cos(angle)+lz*math.sin(angle)
                 v.co.y=-(lz*math.cos(angle)-lx*math.sin(angle))
+            obj['source_vertices']=source_vertices
             for poly in mesh.polygons: poly.use_smooth=True
             obj['refinement']='Asymmetric leaves, scalloped margins, raised midrib and secondary ribs'
         elif lining:

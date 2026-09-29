@@ -3,6 +3,7 @@ import { useFrame, useThree } from "@react-three/fiber";
 import { BufferGeometry, Group, Mesh } from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { geometryKey } from "./geometryKey";
+import { withSourceColors } from "./refinedColors";
 
 export type RefinedModel = "lettuce" | "tent" | "reservoir" | "light" | "fan" | "controller" | "pump";
 const cache = new Map<RefinedModel, Promise<Map<string, BufferGeometry>>>();
@@ -33,7 +34,7 @@ export function RefinedGeometry({ model, enabled, children }: { model: RefinedMo
   const group = useRef<Group>(null);
   const canvas = useThree((state) => state.gl.domElement);
   const [loaded, setLoaded] = useState<{ model: RefinedModel; geometries: Map<string, BufferGeometry> }>();
-  const replacements = useRef(new Map<Mesh, { original: BufferGeometry; refined: BufferGeometry }>());
+  const replacements = useRef(new Map<Mesh, { original: BufferGeometry; refined: BufferGeometry; owned: boolean }>());
   useEffect(() => {
     if (!enabled) return;
     let active = true;
@@ -44,7 +45,10 @@ export function RefinedGeometry({ model, enabled, children }: { model: RefinedMo
   useEffect(() => {
     const owned = replacements.current;
     return () => {
-      owned.forEach(({ original, refined }, mesh) => { if (mesh.geometry === refined) mesh.geometry = original; });
+      owned.forEach(({ original, refined, owned: dispose }, mesh) => {
+        if (mesh.geometry === refined) mesh.geometry = original;
+        if (dispose) refined.dispose();
+      });
       owned.clear();
     };
   }, [model, enabled]);
@@ -54,13 +58,20 @@ export function RefinedGeometry({ model, enabled, children }: { model: RefinedMo
     group.current.traverse((object) => {
       if (!(object instanceof Mesh)) return;
       const original = object.geometry;
+      const previous = replacements.current.get(object);
+      if (previous?.refined === original) { count++; return; }
       let key = keys.get(original);
       if (!key) { key = geometryKey(original); keys.set(original, key); }
-      const refined = loaded.geometries.get(key);
+      let refined = loaded.geometries.get(key);
       if (!refined) return;
       count++;
       if (original === refined) return;
-      replacements.current.set(object, { original, refined });
+      if (previous?.owned) previous.refined.dispose();
+      // Blender may split/reorder vertices. Restore live plant colors by source vertex ID.
+      const colored = withSourceColors(refined, original);
+      const ownsGeometry = Boolean(colored);
+      if (colored) refined = colored;
+      replacements.current.set(object, { original, refined, owned: ownsGeometry });
       object.geometry = refined;
     });
     group.current.userData.refinedMeshes = count;

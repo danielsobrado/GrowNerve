@@ -29,7 +29,7 @@ export function LettucePlant({ quality, attention, occupied, seed }: QualityProp
     <mesh position={[0, -0.14, 0]}><cylinderGeometry args={[0.19, 0.17, 0.045, 24]} /><meshStandardMaterial color="#443328" roughness={1} /></mesh>
     <Batch items={clay} color="#a47851" surface="concrete" sphere />
     {occupied && <mesh geometry={geometry} rotation={[0, seed * 0.71, 0]} castShadow={quality.shadows}>
-      <CC0Material surface="leaf" color={attention ? "#e3cd92" : "#ffffff"} vertexColors roughness={0.78} grain={0.16} sheen={0.22} sheenColor="#b5d89b" clearcoat={0.05} />
+      <CC0Material surface="leaf" vertexColors roughness={0.78} grain={0.16} sheen={0.22} sheenColor="#b5d89b" clearcoat={0.05} />
     </mesh>}
   </group>;
 }

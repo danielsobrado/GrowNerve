@@ -10,6 +10,7 @@ import type { EntityType, FarmData, SceneEntity } from "../domain/model";
 import { CC0Material, TextureResolution } from "./materials/CC0Material";
 import { AirPump, CirculationFan, Controller, DwcReservoir, GrowLight, GrowTent, LettucePlant } from "./models/GrowModels";
 import { RefinedGeometry, type RefinedModel } from "./models/RefinedGeometry";
+import { HydroponicTower } from "./models/HydroponicTower";
 import { type TwinPerformanceProfile, useTwinPerformanceProfile } from "./performance";
 import { actionsForProfile, entityKey, sceneBindings } from "./sceneState";
 import { latestMeasurementsByChannel, readingByKey } from "./telemetry";
@@ -126,7 +127,7 @@ function Scene({ data, latest, quality, selection, onSelect, cutaway }: { data: 
       const reservoir = binding.entity_type === "reservoir" ? data.reservoirs.find((entry) => entry.id === binding.entity_id) : undefined;
       const plant = binding.entity_type === "plant_position" ? data.plant_positions.find((entry) => entry.id === binding.entity_id) : undefined;
       return <Selectable key={key} binding={binding} selected={Boolean(selected)} onSelect={onSelect} title={tooltip.title} detail={tooltip.detail}>
-        <RefinedGeometry model={refinedModels[binding.profile] ?? "tent"} enabled={quality.name !== "low-power"}>
+        <RefinedGeometry model={refinedModels[binding.profile] ?? "tent"} enabled={Boolean(refinedModels[binding.profile]) && quality.name !== "low-power"}>
         {binding.profile === "zone" && <GrowTent quality={quality} />}
         {binding.profile === "reservoir" && <DwcReservoir quality={quality} level={reservoir?.level_percent ?? 0} cutaway={cutaway} rootPositions={layout.entities
           .filter((entry) => entry.profile === "plant" && data.plant_positions.some((position) => position.id === entry.entity_id && position.occupied && position.zone_id === reservoir?.zone_id))
@@ -137,6 +138,7 @@ function Scene({ data, latest, quality, selection, onSelect, cutaway }: { data: 
         {binding.profile === "plant" && <LettucePlant quality={quality} attention={plant?.health === "attention"} occupied={Boolean(plant?.occupied)} seed={index} />}
         {binding.profile === "controller" && <Controller online={Boolean(equipment?.online)} />}
         {binding.profile === "air_pump" && <AirPump running={Boolean(equipment?.state)} />}
+        {binding.profile === "hydroponic_tower" && <Suspense fallback={null}><HydroponicTower levels={data.zones.filter((zone) => zone.parent_zone_id === binding.entity_id && zone.type === "level").length || 6} /></Suspense>}
         </RefinedGeometry>
       </Selectable>;
     })}
@@ -145,6 +147,8 @@ function Scene({ data, latest, quality, selection, onSelect, cutaway }: { data: 
 }
 
 export function DigitalTwin({ data, selection, onSelect, onAction }: { data: FarmData; selection?: Selection; onSelect: (selection: Selection) => void; onAction: (action: string) => void }) {
+  const [view, setView] = useState<"farm" | "tower">("farm");
+  const [towerLevels, setTowerLevels] = useState(6);
   const [renderer, setRenderer] = useState<"starting" | "webgpu" | "webgl">("starting");
   const [cutaway, setCutaway] = useState(false);
   const quality = useTwinPerformanceProfile();
@@ -171,19 +175,36 @@ export function DigitalTwin({ data, selection, onSelect, onAction }: { data: Far
   }, [quality.antialias]);
   const rendererLabel = renderer === "webgpu" ? "WebGPU · CC0 materials" : renderer === "webgl" ? "WebGL · CC0 materials" : "Starting renderer";
   const help = quality.touchOptimized ? "Drag to orbit · Pinch to zoom · Tap an object to inspect" : "Drag to orbit · Scroll to zoom · Click an object to inspect";
-  return <div className="gn-twin-wrap">
-    <Canvas shadows={quality.shadows} gl={createRenderer} camera={{ position: data.scene_layouts[0]?.camera_position ?? [7, 6, 8], fov: 42 }} dpr={quality.dpr}>
+  return <div className="gn-model-viewer">
+    <div className="gn-model-switch" role="group" aria-label="3D view">
+      <button aria-pressed={view === "farm"} onClick={() => setView("farm")}>Farm</button>
+      <button aria-pressed={view === "tower"} onClick={() => setView("tower")}>Hydroponic tower</button>
+      {view === "tower" && <label>Levels <select aria-label="Tower levels" value={towerLevels} onChange={(event) => setTowerLevels(Number(event.target.value))}>{[3, 4, 6, 8].map((count) => <option key={count} value={count}>{count}</option>)}</select><span>{towerLevels * 3} planting sites · Model preview</span></label>}
+    </div>
+    <div className="gn-twin-wrap">
+    <Canvas key={view} shadows={quality.shadows} gl={createRenderer} camera={{ position: view === "tower" ? [3, 2.6, 4] : data.scene_layouts[0]?.camera_position ?? [7, 6, 8], fov: 42 }} dpr={quality.dpr}>
       <TextureResolution.Provider value={quality.name === "desktop" ? 1024 : 512}>
-        <Scene data={data} latest={latest} quality={quality} selection={selection} onSelect={onSelect} cutaway={cutaway} />
+        {view === "farm" ? <Scene data={data} latest={latest} quality={quality} selection={selection} onSelect={onSelect} cutaway={cutaway} /> : <>
+          <color attach="background" args={["#15201b"]} />
+          <ambientLight intensity={0.65} />
+          <directionalLight position={[3, 5, 4]} intensity={3} castShadow={quality.shadows} shadow-normalBias={0.015} />
+          <directionalLight position={[-3, 3, -2]} intensity={1.4} color="#dde8f0" />
+          <Suspense fallback={null}>
+            <Environment files={`${import.meta.env.BASE_URL}textures/cc0/studio_small_09_1k.hdr`} environmentIntensity={0.8} />
+            <HydroponicTower levels={towerLevels} />
+          </Suspense>
+          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.01, 0]} receiveShadow><planeGeometry args={[20, 20]} /><CC0Material surface="concrete" repeat={[10, 10]} color="#344239" roughness={1} grain={0.12} /></mesh>
+          <OrbitControls makeDefault minDistance={1.2} maxDistance={12} maxPolarAngle={Math.PI / 2.02} target={[0, (0.5 + towerLevels * 0.3) / 2, 0]} />
+        </>}
       </TextureResolution.Provider>
     </Canvas>
     <div className="gn-renderer-badge"><span />{rendererLabel} · {quality.name}</div>
-    <button className="gn-cutaway-toggle" aria-pressed={cutaway} onClick={() => setCutaway((value) => !value)}><Eye size={14} />{cutaway ? "Close reservoir" : "Look inside reservoir"}</button>
-    <TwinHud data={data} />
+    {view === "farm" && <><button className="gn-cutaway-toggle" aria-pressed={cutaway} onClick={() => setCutaway((value) => !value)}><Eye size={14} />{cutaway ? "Close reservoir" : "Look inside reservoir"}</button><TwinHud data={data} /></>}
     <div className="gn-scene-help">{help}</div>
-    {selectedBinding && selectedTooltip && <div className="gn-context-panel">
+    {view === "farm" && selectedBinding && selectedTooltip && <div className="gn-context-panel">
       <div className="gn-context-target"><span>Selected</span><strong>{selectedTooltip.title}</strong><small>{selectedTooltip.detail}</small></div>
       <div className="gn-radial" role="toolbar" aria-label={`${selectedTooltip.title} actions`}>{actionsForProfile(selectedBinding.profile).slice(0, 5).map((action) => { const Icon = actionIcon(action); return <button key={action} title={action} aria-label={action} onClick={() => onAction(action)}><Icon size={15} strokeWidth={1.8} /><span>{action}</span></button>; })}</div>
     </div>}
+    </div>
   </div>;
 }

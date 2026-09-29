@@ -15,6 +15,7 @@ const profileActions: Record<string, string[]> = {
   zone: ["Inspect", "Conditions", "Grow cycles", "History"],
   controller: ["Inspect", "History", "Configure"],
   air_pump: ["Inspect", "Set state", "History", "Maintenance"],
+  hydroponic_tower: ["Inspect", "Conditions", "Grow cycles", "History"],
 };
 
 export function actionsForProfile(profile: string): string[] {

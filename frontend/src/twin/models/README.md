@@ -1,5 +1,9 @@
 # Built-in grow equipment
 
+## Blender refinements
+
+The models now load locally authored geometry from Blender through `RefinedGeometry.tsx`. The seven editable `.blend` files, studio previews, and round-trip instructions are in [`assets/blender`](../../../../assets/blender/README.md). Geometry exchange preserves live materials, animation, picking, occupancy and reservoir controls. Desktop foliage retains its source vertex correspondence so health coloring still affects the older outer leaves. Smaller device profiles retain reduced procedural foliage; low-power mode skips the extra assets.
+
 The digital twin builds these local Three.js models and loads bundled CC0 PBR textures. It makes no requests to external asset providers at runtime:
 
 - Bibb lettuce with cupped, rippled leaves, vertex-colored veins, older outer leaves for attention state, clay pebbles, and slotted net baskets. Empty positions omit foliage.
