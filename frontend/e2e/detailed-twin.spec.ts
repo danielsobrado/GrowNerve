@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 test("renders detailed equipment and opens the reservoir cutaway", async ({ page }, testInfo) => {
-  test.setTimeout(90_000);
+  test.setTimeout(150_000);
   const errors: string[] = [];
   const textures = new Set<string>();
   page.on("response", (response) => {
@@ -9,7 +9,7 @@ test("renders detailed equipment and opens the reservoir cutaway", async ({ page
   });
   page.on("pageerror", (error) => { errors.push(error.message); console.error("Twin browser error:", error.message); });
   page.on("console", (message) => {
-    if (message.type() === "error" && /PTL material preparation failed|CC0 texture loading failed/.test(message.text())) errors.push(message.text());
+    if (message.type() === "error" && /PTL material preparation failed|CC0 texture loading failed|Blender geometry loading failed/.test(message.text())) errors.push(message.text());
   });
   await page.goto("./");
   await page.getByRole("button", { name: "Load pilot example" }).click();
@@ -19,6 +19,11 @@ test("renders detailed equipment and opens the reservoir cutaway", async ({ page
   await expect(page.locator(".gn-renderer-badge")).toContainText(/WebGPU|WebGL/, { timeout: 60_000 });
   await expect(page.locator("canvas")).toBeVisible();
   await expect.poll(() => textures.size, { timeout: 30_000 }).toBe(15);
+  if (!(await page.locator(".gn-renderer-badge").innerText()).includes("low-power")) {
+    for (const model of ["lettuce", "tent", "reservoir", "light", "fan", "controller", "pump"]) {
+      await expect(page.locator("canvas")).toHaveAttribute(`data-blender-${model}`, /^[1-9]\d*$/, { timeout: 30_000 });
+    }
+  }
   await page.locator("canvas").click();
   await expect(page.locator(".gn-context-target strong")).toHaveText(/.+/);
   await expect(page.getByRole("toolbar", { name: / actions$/ })).toBeVisible();

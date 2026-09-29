@@ -19,7 +19,7 @@ export default defineConfig(({ mode }) => {
         start_url: ".",
         icons: [{ src: "grownerve-mark.svg", sizes: "any", type: "image/svg+xml", purpose: "any maskable" }],
       },
-      workbox: { globPatterns: ["**/*.{js,css,html,svg,png,jpg,hdr,woff2,glb}"] },
+      workbox: { globPatterns: ["**/*.{js,css,html,svg,png,jpg,hdr,woff2,glb}"], maximumFileSizeToCacheInBytes: 3 * 1024 * 1024 },
       devOptions: { enabled: browser },
     })],
     define: { "import.meta.env.VITE_RUNTIME_MODE": JSON.stringify(env.VITE_RUNTIME_MODE || (browser ? "browser" : "server")) },

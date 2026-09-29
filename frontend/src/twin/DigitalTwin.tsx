@@ -9,6 +9,7 @@ import { ACESFilmicToneMapping, WebGLRenderer, type WebGLRendererParameters } fr
 import type { EntityType, FarmData, SceneEntity } from "../domain/model";
 import { CC0Material, TextureResolution } from "./materials/CC0Material";
 import { AirPump, CirculationFan, Controller, DwcReservoir, GrowLight, GrowTent, LettucePlant } from "./models/GrowModels";
+import { RefinedGeometry, type RefinedModel } from "./models/RefinedGeometry";
 import { type TwinPerformanceProfile, useTwinPerformanceProfile } from "./performance";
 import { actionsForProfile, entityKey, sceneBindings } from "./sceneState";
 import { latestMeasurementsByChannel, readingByKey } from "./telemetry";
@@ -19,6 +20,7 @@ export interface Selection { type: EntityType; id: string }
 
 type ActionIcon = ComponentType<{ size?: number; strokeWidth?: number }>;
 type LatestMeasurements = ReturnType<typeof latestMeasurementsByChannel>;
+const refinedModels: Record<string, RefinedModel> = { zone: "tent", reservoir: "reservoir", light: "light", fan: "fan", plant: "lettuce", controller: "controller", air_pump: "pump" };
 
 function actionIcon(action: string): ActionIcon {
   switch (action) {
@@ -124,6 +126,7 @@ function Scene({ data, latest, quality, selection, onSelect, cutaway }: { data: 
       const reservoir = binding.entity_type === "reservoir" ? data.reservoirs.find((entry) => entry.id === binding.entity_id) : undefined;
       const plant = binding.entity_type === "plant_position" ? data.plant_positions.find((entry) => entry.id === binding.entity_id) : undefined;
       return <Selectable key={key} binding={binding} selected={Boolean(selected)} onSelect={onSelect} title={tooltip.title} detail={tooltip.detail}>
+        <RefinedGeometry model={refinedModels[binding.profile] ?? "tent"} enabled={quality.name !== "low-power"}>
         {binding.profile === "zone" && <GrowTent quality={quality} />}
         {binding.profile === "reservoir" && <DwcReservoir quality={quality} level={reservoir?.level_percent ?? 0} cutaway={cutaway} rootPositions={layout.entities
           .filter((entry) => entry.profile === "plant" && data.plant_positions.some((position) => position.id === entry.entity_id && position.occupied && position.zone_id === reservoir?.zone_id))
@@ -134,6 +137,7 @@ function Scene({ data, latest, quality, selection, onSelect, cutaway }: { data: 
         {binding.profile === "plant" && <LettucePlant quality={quality} attention={plant?.health === "attention"} occupied={Boolean(plant?.occupied)} seed={index} />}
         {binding.profile === "controller" && <Controller online={Boolean(equipment?.online)} />}
         {binding.profile === "air_pump" && <AirPump running={Boolean(equipment?.state)} />}
+        </RefinedGeometry>
       </Selectable>;
     })}
     <OrbitControls makeDefault minDistance={2.5} maxDistance={18} maxPolarAngle={Math.PI / 2.05} target={[0, 1.1, 0]} />

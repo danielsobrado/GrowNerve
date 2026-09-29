@@ -12,7 +12,7 @@ type QualityProps = { quality: TwinPerformanceProfile };
 const range = (count: number) => Array.from({ length: count }, (_, index) => index);
 
 export function LettucePlant({ quality, attention, occupied, seed }: QualityProps & { attention: boolean; occupied: boolean; seed: number }) {
-  const geometry = useMemo(() => createLettuceGeometry(quality.geometryScale, attention, seed), [quality.geometryScale, attention, seed]);
+  const geometry = useMemo(() => createLettuceGeometry(quality.geometryScale, attention, 0), [quality.geometryScale, attention]);
   useEffect(() => () => geometry.dispose(), [geometry]);
   const slots = useMemo<Instance[]>(() => range(20).map((i) => {
     const angle = i * Math.PI / 10;
@@ -28,8 +28,8 @@ export function LettucePlant({ quality, attention, occupied, seed }: QualityProp
     {[-0.12, -0.25, -0.34].map((y) => <Ring key={y} radius={y === -0.34 ? 0.17 : 0.2} tube={0.018} position={[0, y, 0]} rotation={[Math.PI / 2, 0, 0]} color="#1c2c22" metalness={0} />)}
     <mesh position={[0, -0.14, 0]}><cylinderGeometry args={[0.19, 0.17, 0.045, 24]} /><meshStandardMaterial color="#443328" roughness={1} /></mesh>
     <Batch items={clay} color="#a47851" surface="concrete" sphere />
-    {occupied && <mesh geometry={geometry} castShadow={quality.shadows}>
-      <CC0Material surface="leaf" vertexColors roughness={0.88} grain={0.32} sheen={0.22} sheenColor="#b5d89b" clearcoat={0.05} />
+    {occupied && <mesh geometry={geometry} rotation={[0, seed * 0.71, 0]} castShadow={quality.shadows}>
+      <CC0Material surface="leaf" color={attention ? "#e3cd92" : "#ffffff"} vertexColors roughness={0.78} grain={0.16} sheen={0.22} sheenColor="#b5d89b" clearcoat={0.05} />
     </mesh>}
   </group>;
 }
