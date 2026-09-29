@@ -134,6 +134,8 @@ scene['design']='Reference-inspired six-level, three-sites-per-level tower; illu
 scene['tiers']=6;scene['sites_per_tier']=3
 scene['texture_license']='CC0 ambientCG; see frontend/public/textures/cc0/LICENSE.md'
 
+exec(compile((ROOT/'assets/blender/tower_sensors.py').read_text(),'tower_sensors.py','exec'))
+
 # Export the three reusable modules at their common origin.
 destination=ROOT/'frontend/public/models/blender/hydroponic-tower.glb'
 bpy.context.view_layer.update()

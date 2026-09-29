@@ -1,6 +1,26 @@
 # Blender models
 
+## Tent layout editor
+
+**3D Twin → Tent layout** provides a centimetre-based layout for every catalog model, including six individual sensor modules exported by `export_layout_sensors.py`. Set tent width/height/depth, add equipment, select it in 3D or the object list, and resize its three dimensions. Drag translation arrows or use **Place on grid** and tap the floor. Position and elevation snap to 5, 10 or 25 cm; rotation uses 90° increments. Bounds include fittings and attached tubing. Objects stay inside the tent; a tent resize that cannot contain existing equipment is rejected.
+
+The editor supports undo/redo and automatically saves a versioned layout in local browser storage, keyed by facility. These planning layouts are separate from farm records and are not currently included in `.grownerve.json` archives or synchronized to the server. Adding equipment searches for vacant space; subsequent placement allows intentional overlaps (for example probes within a reservoir). Scaling adjusts the complete model, including fittings.
+
+## Fans, humidifiers and irrigation
+
+`climate-systems.blend` contains clip and inline duct fans with separate rotors, guards, supports and power leads; ultrasonic and evaporative humidifiers with controls, tank details, intake/exhaust vents; and two-zone irrigation assemblies with drip stakes or watering rings. The irrigation hardware includes a supply tank, pump, filter, manifold, solenoid valves, controller and tubing. Materials reuse bundled CC0 metal and polymer maps.
+
+Open **3D Twin → Climate & irrigation** to select all six variants. Fan rotation and ultrasonic mist have pause/intensity controls. The evaporative unit has no visible mist. These are model previews, not physical equipment control or connected irrigation schedules. `build_climate_systems.py` exports compact modules, and `prepare_previews.py` can render `preview('climate-systems')`. Dimensions and routing are illustrative.
+
+## LED fixtures and soil pots
+
+`grow-options.blend` and `grow-options.glb` contain panel, linear-bar and six-bar LED fixtures, with circuit boards, individual diodes, heat-sink fins, drivers and suspension eyes. Pots include ribbed nursery plastic, fabric with lifting handles, and terracotta ceramic with a saucer. Each has a hollow interior and central drainage opening. A separate soil insert has modeled soil aggregates and perlite. Hardware and fabric reuse bundled CC0 maps; soil granules are original geometry.
+
+Open **3D Twin → Lights & pots** to select styles, diameter and height (20–50 cm), soil fill, and visual LED brightness. These settings affect the preview only. They do not create farm records, control physical equipment, or estimate light output. `build_grow_options.py` rebuilds the seven compact modules; `prepare_previews.py` can render `preview('grow-options')`.
+
 ## Hydroponic tower
+
+The sensor package includes a vented air humidity/temperature housing, PAR/light sensor, blue pH probe with guarded tip, amber EC probe with electrode rings, stainless water-temperature probe, and float-level sensor. Reservoir probes have bulkhead glands, strain reliefs and leads into a labeled hub. Crown sensors follow the chosen tower height. These are illustrative visual assets without live telemetry. `tower_sensors.py` runs during the tower build. After the studio pass, `sensor_preview.py` saves `sensor-probes.blend` and a separate close-up showing the four immersed probe designs outside the reservoir.
 
 `hydroponic-tower.blend` adds a reference-inspired tower with six staggered levels and 18 angled planting sites. It includes a tapered reservoir, lime lid, separate service caps, drain, tier seams, hollow planting necks, slotted baskets, locking nubs and a top feed fitting. Metal and polymer materials use bundled ambientCG CC0 roughness and normal maps.
 

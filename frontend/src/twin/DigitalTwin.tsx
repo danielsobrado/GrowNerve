@@ -1,16 +1,19 @@
 import { Environment, Html, OrbitControls } from "@react-three/drei";
-import { Canvas } from "@react-three/fiber";
+import { Canvas, useThree } from "@react-three/fiber";
 import {
   AlertTriangle, Camera, CircleEllipsis, ClipboardPlus, Droplets, Eye, FlaskConical,
   Gauge, History, Plus, Power, Scissors, Settings, SlidersHorizontal, Wrench,
 } from "lucide-react";
-import { Suspense, useCallback, useMemo, useState, type ComponentType } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState, type ComponentType } from "react";
 import { ACESFilmicToneMapping, WebGLRenderer, type WebGLRendererParameters } from "three";
 import type { EntityType, FarmData, SceneEntity } from "../domain/model";
 import { CC0Material, TextureResolution } from "./materials/CC0Material";
 import { AirPump, CirculationFan, Controller, DwcReservoir, GrowLight, GrowTent, LettucePlant } from "./models/GrowModels";
 import { RefinedGeometry, type RefinedModel } from "./models/RefinedGeometry";
 import { HydroponicTower } from "./models/HydroponicTower";
+import { GrowOptions } from "./models/GrowOptions";
+import { ClimateSystems, type ClimateConfig } from "./models/ClimateSystems";
+import { TentDesignerControls, TentDesignerScene, useTentDesigner } from "./TentDesigner";
 import { type TwinPerformanceProfile, useTwinPerformanceProfile } from "./performance";
 import { actionsForProfile, entityKey, sceneBindings } from "./sceneState";
 import { latestMeasurementsByChannel, readingByKey } from "./telemetry";
@@ -146,8 +149,20 @@ function Scene({ data, latest, quality, selection, onSelect, cutaway }: { data: 
   </>;
 }
 
+function ViewCamera({ view, farmPosition }: { view: string; farmPosition?: [number, number, number] }) {
+  const camera = useThree((state) => state.camera);
+  useEffect(() => {
+    const position: [number, number, number] = view === "designer" ? [4, 3.5, 5] : view === "systems" ? [1.1, 0.9, 1.4] : view === "equipment" ? [1.2, 1.1, 1.6] : view === "tower" ? [3, 2.6, 4] : farmPosition ?? [7, 6, 8];
+    camera.position.set(...position);
+  }, [camera, view, farmPosition]);
+  return null;
+}
+
 export function DigitalTwin({ data, selection, onSelect, onAction }: { data: FarmData; selection?: Selection; onSelect: (selection: Selection) => void; onAction: (action: string) => void }) {
-  const [view, setView] = useState<"farm" | "tower">("farm");
+  const [view, setView] = useState<"farm" | "tower" | "equipment" | "systems" | "designer">("farm");
+  const tentEditor = useTentDesigner(`grownerve:tent-layout:v1:${data.facilities[0]?.id ?? 'default'}`);
+  const [climate, setClimate] = useState<ClimateConfig>({ category: "fan", variant: "clip", running: true, output: 60 });
+  const [growOptions, setGrowOptions] = useState({ led: "panel", pot: "nursery", diameter: 30, height: 30, fill: 80, output: 70 });
   const [towerLevels, setTowerLevels] = useState(6);
   const [renderer, setRenderer] = useState<"starting" | "webgpu" | "webgl">("starting");
   const [cutaway, setCutaway] = useState(false);
@@ -179,22 +194,39 @@ export function DigitalTwin({ data, selection, onSelect, onAction }: { data: Far
     <div className="gn-model-switch" role="group" aria-label="3D view">
       <button aria-pressed={view === "farm"} onClick={() => setView("farm")}>Farm</button>
       <button aria-pressed={view === "tower"} onClick={() => setView("tower")}>Hydroponic tower</button>
+      <button aria-pressed={view === "equipment"} onClick={() => setView("equipment")}>Lights & pots</button>
+      <button aria-pressed={view === "systems"} onClick={() => setView("systems")}>Climate & irrigation</button>
+      <button aria-pressed={view === "designer"} onClick={() => setView("designer")}>Tent layout</button>
       {view === "tower" && <label>Levels <select aria-label="Tower levels" value={towerLevels} onChange={(event) => setTowerLevels(Number(event.target.value))}>{[3, 4, 6, 8].map((count) => <option key={count} value={count}>{count}</option>)}</select><span>{towerLevels * 3} planting sites · Model preview</span></label>}
     </div>
+    {view === "equipment" && <div className="gn-model-switch" role="group" aria-label="Equipment options">
+      <label>LED <select aria-label="LED style" value={growOptions.led} onChange={(event) => setGrowOptions({ ...growOptions, led: event.target.value })}><option value="panel">Panel</option><option value="bar">Linear bar</option><option value="multi_bar">Multi-bar</option></select></label>
+      <label>Pot <select aria-label="Pot style" value={growOptions.pot} onChange={(event) => setGrowOptions({ ...growOptions, pot: event.target.value })}><option value="nursery">Nursery</option><option value="fabric">Fabric bag</option><option value="ceramic">Ceramic</option></select></label>
+      {([['diameter', 'Diameter', [20, 30, 40, 50]], ['height', 'Height', [20, 30, 40, 50]], ['fill', 'Soil fill', [0, 25, 50, 80, 100]], ['output', 'LED brightness', [0, 25, 50, 70, 100]]] as const).map(([key, label, values]) => <label key={key}>{label}<select aria-label={label} value={growOptions[key]} onChange={(event) => setGrowOptions({ ...growOptions, [key]: Number(event.target.value) })}>{values.map((value) => <option key={value} value={value}>{value}{key === 'diameter' || key === 'height' ? ' cm' : '%'}</option>)}</select></label>)}
+      <span>Model preview · visual brightness</span>
+    </div>}
+    {view === "systems" && <div className="gn-model-switch" role="group" aria-label="Climate equipment options">
+      <label>Equipment <select aria-label="Equipment category" value={climate.category} onChange={(event) => { const category = event.target.value as ClimateConfig['category']; setClimate({ ...climate, category, variant: category === 'fan' ? 'clip' : category === 'humidifier' ? 'ultrasonic' : 'drip' }); }}><option value="fan">Fans</option><option value="humidifier">Humidifiers</option><option value="irrigation">Automated irrigation</option></select></label>
+      <label>Type <select aria-label="Equipment variant" value={climate.variant} onChange={(event) => setClimate({ ...climate, variant: event.target.value })}>{(climate.category === 'fan' ? [['clip', 'Clip fan'], ['inline', 'Inline duct fan']] : climate.category === 'humidifier' ? [['ultrasonic', 'Ultrasonic'], ['evaporative', 'Evaporative wick']] : [['drip', 'Drip stakes'], ['ring', 'Watering rings']]).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+      {climate.category === 'fan' || (climate.category === 'humidifier' && climate.variant === 'ultrasonic') ? <><button aria-pressed={climate.running} onClick={() => setClimate({ ...climate, running: !climate.running })}>{climate.running ? 'Pause animation' : 'Start animation'}</button><label>Animation <select aria-label="Animation intensity" value={climate.output} onChange={(event) => setClimate({ ...climate, output: Number(event.target.value) })}>{[0, 30, 60, 100].map((value) => <option key={value} value={value}>{value}%</option>)}</select></label></> : null}
+      <span>Model preview{climate.category === 'irrigation' ? ' · 2 irrigation zones' : ''}</span>
+    </div>}
+    {view === "designer" && <TentDesignerControls editor={tentEditor} />}
     <div className="gn-twin-wrap">
-    <Canvas key={view} shadows={quality.shadows} gl={createRenderer} camera={{ position: view === "tower" ? [3, 2.6, 4] : data.scene_layouts[0]?.camera_position ?? [7, 6, 8], fov: 42 }} dpr={quality.dpr}>
+    <Canvas shadows={quality.shadows} gl={createRenderer} camera={{ position: data.scene_layouts[0]?.camera_position ?? [7, 6, 8], fov: 42 }} dpr={quality.dpr}>
+      <ViewCamera view={view} farmPosition={data.scene_layouts[0]?.camera_position} />
       <TextureResolution.Provider value={quality.name === "desktop" ? 1024 : 512}>
-        {view === "farm" ? <Scene data={data} latest={latest} quality={quality} selection={selection} onSelect={onSelect} cutaway={cutaway} /> : <>
+        {view === "farm" ? <Scene data={data} latest={latest} quality={quality} selection={selection} onSelect={onSelect} cutaway={cutaway} /> : view === "designer" ? <TentDesignerScene editor={tentEditor} quality={quality} /> : <>
           <color attach="background" args={["#15201b"]} />
           <ambientLight intensity={0.65} />
           <directionalLight position={[3, 5, 4]} intensity={3} castShadow={quality.shadows} shadow-normalBias={0.015} />
           <directionalLight position={[-3, 3, -2]} intensity={1.4} color="#dde8f0" />
           <Suspense fallback={null}>
             <Environment files={`${import.meta.env.BASE_URL}textures/cc0/studio_small_09_1k.hdr`} environmentIntensity={0.8} />
-            <HydroponicTower levels={towerLevels} />
+            {view === "tower" ? <HydroponicTower levels={towerLevels} /> : view === "systems" ? <ClimateSystems {...climate} /> : <GrowOptions {...growOptions} />}
           </Suspense>
           <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.01, 0]} receiveShadow><planeGeometry args={[20, 20]} /><CC0Material surface="concrete" repeat={[10, 10]} color="#344239" roughness={1} grain={0.12} /></mesh>
-          <OrbitControls makeDefault minDistance={1.2} maxDistance={12} maxPolarAngle={Math.PI / 2.02} target={[0, (0.5 + towerLevels * 0.3) / 2, 0]} />
+          <OrbitControls makeDefault minDistance={view === "tower" ? 1.2 : 0.6} maxDistance={12} maxPolarAngle={Math.PI / 2.02} target={[0, view === "systems" ? 0.22 : view === "equipment" ? 0.45 : (0.5 + towerLevels * 0.3) / 2, 0]} />
         </>}
       </TextureResolution.Provider>
     </Canvas>
