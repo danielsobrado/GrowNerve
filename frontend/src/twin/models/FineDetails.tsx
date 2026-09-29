@@ -38,7 +38,7 @@ export function TentLining({ quality, position, rotation }: { quality: TwinPerfo
   }, [detail]);
   useEffect(() => () => geometry.dispose(), [geometry]);
   return <mesh geometry={geometry} position={position} rotation={rotation} receiveShadow>
-    <CC0Material surface="metal" repeat={[3, 3]} color="#c7cec5" roughness={0.5} metalness={0.65} grain={0.35} side={DoubleSide} />
+    <CC0Material surface="metal" repeat={[3, 3]} color="#e3e7df" roughness={0.65} metalness={0.48} grain={0.25} side={DoubleSide} />
   </mesh>;
 }
 

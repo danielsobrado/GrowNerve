@@ -1,7 +1,7 @@
 {
   "provider": "ambientCG / Lennart Demes",
   "licenseUrl": "https://docs.ambientcg.com/license/",
-  "processing": "1K source maps resized and JPEG encoded; OpenGL normals kept in linear color space.",
+  "processing": "1K source maps resized and JPEG encoded; OpenGL normals kept in linear color space. HDRI bundled unchanged.",
   "assets": [
     {
       "key": "metal",
@@ -203,5 +203,15 @@
         }
       ]
     }
-  ]
+  ],
+  "environment": {
+    "provider": "Poly Haven / Sergej Majboroda",
+    "source": "https://polyhaven.com/a/studio_small_09",
+    "license": "CC0-1.0",
+    "licenseUrl": "https://polyhaven.com/license",
+    "download": "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/studio_small_09_1k.hdr",
+    "file": "studio_small_09_1k.hdr",
+    "bytes": 1615248,
+    "sha256": "e7cfda5f4e98e623db12b8bfd0184e048488e4855d9c83e2751fb44a32e80c45"
+  }
 }

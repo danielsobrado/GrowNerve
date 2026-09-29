@@ -1,10 +1,10 @@
-import { Html, OrbitControls } from "@react-three/drei";
+import { Environment, Html, OrbitControls } from "@react-three/drei";
 import { Canvas } from "@react-three/fiber";
 import {
   AlertTriangle, Camera, CircleEllipsis, ClipboardPlus, Droplets, Eye, FlaskConical,
   Gauge, History, Plus, Power, Scissors, Settings, SlidersHorizontal, Wrench,
 } from "lucide-react";
-import { useCallback, useMemo, useState, type ComponentType } from "react";
+import { Suspense, useCallback, useMemo, useState, type ComponentType } from "react";
 import { ACESFilmicToneMapping, WebGLRenderer, type WebGLRendererParameters } from "three";
 import type { EntityType, FarmData, SceneEntity } from "../domain/model";
 import { CC0Material, TextureResolution } from "./materials/CC0Material";
@@ -98,13 +98,14 @@ function Scene({ data, latest, quality, selection, onSelect, cutaway }: { data: 
   const device = (binding: SceneEntity) => data.devices.find((entry) => entry.id === binding.entity_id);
   return <>
     <color attach="background" args={["#101b16"]} />
-    <ambientLight intensity={0.45} />
-    <hemisphereLight args={["#e7efd8", "#283c30", 1.1]} />
-    <directionalLight position={[-4, 4, -2]} intensity={1.2} color="#c5e0df" />
+    <Suspense fallback={null}><Environment files={`${import.meta.env.BASE_URL}textures/cc0/studio_small_09_1k.hdr`} environmentIntensity={1.1} /></Suspense>
+    <ambientLight intensity={0.4} />
+    <hemisphereLight args={["#f1f3e9", "#38463e", 0.9]} />
+    <directionalLight position={[-4, 4, -2]} intensity={1.1} color="#dce9ef" />
     <directionalLight
       position={[5, 7, 4]}
-      intensity={2.5}
-      color="#fff8df"
+      intensity={2.75}
+      color="#fff8ee"
       castShadow={quality.shadows}
       shadow-mapSize-width={quality.shadowMapSize}
       shadow-mapSize-height={quality.shadowMapSize}
@@ -115,8 +116,8 @@ function Scene({ data, latest, quality, selection, onSelect, cutaway }: { data: 
       shadow-camera-bottom={-5}
       shadow-camera-far={20}
     />
-    <pointLight position={[0, 2.65, 0]} intensity={data.devices.find((entry) => entry.type === "light")?.state ? 7 : 0} color="#fff1d2" />
-    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.035, 0]} receiveShadow><planeGeometry args={[12, 12]} /><CC0Material surface="concrete" repeat={[6, 6]} color="#5b655f" roughness={0.92} grain={0.5} /></mesh>
+    <pointLight position={[0, 2.65, 0]} intensity={data.devices.find((entry) => entry.type === "light")?.state ? 5 : 0} color="#fff8ef" />
+    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.035, 0]} receiveShadow><planeGeometry args={[40, 40]} /><CC0Material surface="concrete" repeat={[20, 20]} color="#303a34" roughness={1} grain={0.14} /></mesh>
     {sceneBindings(data).map((binding, index) => {
       const key = entityKey(binding.entity_type, binding.entity_id), selected = selection && entityKey(selection.type, selection.id) === key;
       const equipment = device(binding), tooltip = tooltipFor(data, latest, binding);

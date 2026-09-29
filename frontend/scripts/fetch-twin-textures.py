@@ -49,5 +49,11 @@ if __name__ == "__main__":
     ROOT.mkdir(parents=True, exist_ok=True)
     with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
         assets = list(pool.map(prepare, ASSETS.items()))
-    (ROOT / "manifest.json").write_text(json.dumps({"provider": "ambientCG / Lennart Demes", "licenseUrl": "https://docs.ambientcg.com/license/", "processing": "1K source maps resized and JPEG encoded; OpenGL normals kept in linear color space.", "assets": assets}, indent=2) + "\n", encoding="utf-8")
+    hdr_url = "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/studio_small_09_1k.hdr"
+    hdr = ROOT / "studio_small_09_1k.hdr"
+    if not hdr.exists():
+        with urllib.request.urlopen(hdr_url, timeout=120) as response:
+            hdr.write_bytes(response.read())
+    environment = {"provider": "Poly Haven / Sergej Majboroda", "source": "https://polyhaven.com/a/studio_small_09", "license": "CC0-1.0", "licenseUrl": "https://polyhaven.com/license", "download": hdr_url, "file": hdr.name, "bytes": hdr.stat().st_size, "sha256": hashlib.sha256(hdr.read_bytes()).hexdigest()}
+    (ROOT / "manifest.json").write_text(json.dumps({"provider": "ambientCG / Lennart Demes", "licenseUrl": "https://docs.ambientcg.com/license/", "processing": "1K source maps resized and JPEG encoded; OpenGL normals kept in linear color space. HDRI bundled unchanged.", "assets": assets, "environment": environment}, indent=2) + "\n", encoding="utf-8")
     print("Texture bytes:", sum(f["bytes"] for a in assets for f in a["files"]))

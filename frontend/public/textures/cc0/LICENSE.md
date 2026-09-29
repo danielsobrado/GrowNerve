@@ -17,3 +17,11 @@ Source 1K JPG maps are resized/re-encoded into 1024px and 512px variants. Color 
 Regenerate with `python scripts/fetch-twin-textures.py` from `frontend` (requires Pillow). Files are bundled locally and precached by the PWA; the running app does not contact ambientCG.
 
 This dedication applies to these texture images, not to the application's source code or branding.
+
+## Studio lighting
+
+`studio_small_09_1k.hdr` is **Studio Small 09**, by Sergej Majboroda / Poly Haven, licensed CC0 1.0. It is bundled unmodified for reflection and environment lighting.
+
+- Asset: https://polyhaven.com/a/studio_small_09
+- License: https://polyhaven.com/license
+- Download: https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/studio_small_09_1k.hdr

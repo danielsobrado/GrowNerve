@@ -26,8 +26,9 @@ type MaterialProps = Omit<ThreeElements["meshPhysicalMaterial"], "ref" | "args">
 export function CC0Material({ surface, repeat = [1, 1], grain = 0.3, albedo = true, ...props }: MaterialProps) {
   const resolution = useContext(TextureResolution);
   const [maps, setMaps] = useState<{ key: string; textures: Texture[] }>();
-  const key = `${surface}/${resolution}/${repeat[0]}/${repeat[1]}`;
-  const settings = useMemo(() => ({ surface, resolution, x: repeat[0], y: repeat[1] }), [surface, resolution, repeat[0], repeat[1]]);
+  const [x, y] = repeat;
+  const key = `${surface}/${resolution}/${x}/${y}`;
+  const settings = useMemo(() => ({ surface, resolution, x, y }), [surface, resolution, x, y]);
   useEffect(() => {
     let active = true;
     let entry = variants.get(key);
@@ -63,6 +64,7 @@ export function CC0Material({ surface, repeat = [1, 1], grain = 0.3, albedo = tr
   }, [key, settings]);
   const textures = maps?.key === key ? maps.textures : undefined;
   return <meshPhysicalMaterial
+    key={`${key}/${Boolean(textures)}`}
     map={albedo ? textures?.[0] : null} normalMap={textures?.[1]} roughnessMap={textures?.[2]}
     normalScale={[grain, grain]} roughness={0.7} side={surface === "leaf" ? DoubleSide : undefined}
     {...props}
