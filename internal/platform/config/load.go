@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -67,6 +68,15 @@ func applyEnvironment(config *Config) error {
 			return fmt.Errorf("APP_TELEMETRY__RETENTION must be a duration: %w", err)
 		}
 		config.Telemetry.Retention = parsed
+	}
+	text("APP_INTEGRATIONS__ZIGBEE2MQTT__BROKER", &config.Integrations.Zigbee2MQTT.Broker)
+	text("APP_INTEGRATIONS__ZIGBEE2MQTT__BASE_TOPIC", &config.Integrations.Zigbee2MQTT.BaseTopic)
+	if value := strings.TrimSpace(os.Getenv("APP_INTEGRATIONS__ZIGBEE2MQTT__ENABLED")); value != "" {
+		parsed, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf("APP_INTEGRATIONS__ZIGBEE2MQTT__ENABLED must be true or false: %w", err)
+		}
+		config.Integrations.Zigbee2MQTT.Enabled = parsed
 	}
 	if value := strings.TrimSpace(os.Getenv("APP_MEDIA__PATH")); value != "" {
 		config.Media.Path = value
@@ -130,6 +140,19 @@ func applyDefaults(config *Config) {
 		if *target == 0 {
 			*target = value
 		}
+	}
+	zigbee := &config.Integrations.Zigbee2MQTT
+	if zigbee.BaseTopic == "" {
+		zigbee.BaseTopic = "zigbee2mqtt"
+	}
+	if zigbee.ClientID == "" {
+		zigbee.ClientID = "grownerve-server-zigbee2mqtt"
+	}
+	if zigbee.AvailabilityFallback == 0 {
+		zigbee.AvailabilityFallback = 90 * time.Minute
+	}
+	if config.Integrations.LivenessInterval == 0 {
+		config.Integrations.LivenessInterval = min(30*time.Second, config.Runtime.DeviceOfflineAfter/3)
 	}
 }
 
@@ -234,7 +257,37 @@ func (config Config) Validate() error {
 	if config.Media.MaximumBytes < 0 {
 		return errors.New("media.maximum_bytes cannot be negative")
 	}
+	if err := config.validateIntegrations(); err != nil {
+		return err
+	}
 	return config.validateProduction()
+}
+
+func (config Config) validateIntegrations() error {
+	integrations := config.Integrations
+	if err := rejectNegativeDuration("integrations.liveness_interval", integrations.LivenessInterval); err != nil {
+		return err
+	}
+	if integrations.LivenessInterval > 0 && config.Runtime.DeviceOfflineAfter > 0 && integrations.LivenessInterval*2 > config.Runtime.DeviceOfflineAfter {
+		return errors.New("integrations.liveness_interval must be at most half of runtime.device_offline_after, or adopted devices will flap offline")
+	}
+	zigbee := integrations.Zigbee2MQTT
+	if !zigbee.Enabled {
+		return nil
+	}
+	if zigbee.Broker != "" {
+		parsed, err := url.Parse(zigbee.Broker)
+		if err != nil || parsed.Host == "" || !slices.Contains([]string{"tcp", "ssl", "tls", "mqtt", "mqtts", "ws", "wss"}, parsed.Scheme) {
+			return fmt.Errorf("integrations.zigbee2mqtt.broker %q must be an MQTT broker URL such as tcp://host:1883", zigbee.Broker)
+		}
+	}
+	if topic := zigbee.BaseTopic; topic == "" || strings.ContainsAny(topic, "#+") || strings.HasPrefix(topic, "/") || strings.HasSuffix(topic, "/") {
+		return errors.New("integrations.zigbee2mqtt.base_topic must be a plain topic without wildcards or leading/trailing slashes")
+	}
+	if err := rejectNegativeDuration("integrations.zigbee2mqtt.availability_fallback", zigbee.AvailabilityFallback); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (config Config) validateProduction() error {
@@ -254,6 +307,10 @@ func (config Config) validateProduction() error {
 	}
 	if strings.TrimSpace(config.MQTT.UsernameEnv) == "" || strings.TrimSpace(config.MQTT.PasswordEnv) == "" {
 		return errors.New("production requires mqtt.username_env and mqtt.password_env; anonymous broker access is not permitted")
+	}
+	if zigbee := config.Integrations.Zigbee2MQTT; zigbee.Enabled && zigbee.Broker != "" &&
+		(strings.TrimSpace(zigbee.UsernameEnv) == "" || strings.TrimSpace(zigbee.PasswordEnv) == "") {
+		return errors.New("production requires integrations.zigbee2mqtt.username_env and password_env when it uses its own broker")
 	}
 	if config.Auth.Mode == ModeOIDC {
 		issuer, err := url.Parse(config.Auth.OIDC.Issuer)

@@ -1,5 +1,8 @@
 import { z } from "zod";
-import { emptyFarmData, farmDataKeys, type FarmData, type GrowNerveArchive, type MediaObject } from "../domain/model";
+import { emptyFarmData, farmDataKeys, integrationProviders, type ArchiveLayout, type FarmData, type GrowNerveArchive, type MediaObject } from "../domain/model";
+import { validateLayout } from "../twin/tentLayout";
+
+const DEFAULT_LAYOUT_OWNER = "default";
 
 const uuid = z.string().uuid();
 const archiveEnvelope = z.object({
@@ -10,6 +13,7 @@ const archiveEnvelope = z.object({
   export_id: uuid,
   data: z.record(z.string(), z.array(z.unknown())),
   media: z.array(z.object({ id: uuid, mime_type: z.string(), sha256: z.string(), filename: z.string(), data_base64: z.string() })),
+  layouts: z.array(z.object({ facility_id: z.string().min(1).max(64), layout: z.unknown() })).max(100).optional(),
 });
 
 function stableData(data: FarmData): FarmData {
@@ -20,7 +24,7 @@ function stableData(data: FarmData): FarmData {
   return result;
 }
 
-export function createArchive(data: FarmData, metadata: { now?: string; exportId?: string; media?: MediaObject[] } = {}): GrowNerveArchive {
+export function createArchive(data: FarmData, metadata: { now?: string; exportId?: string; media?: MediaObject[]; layouts?: ArchiveLayout[] } = {}): GrowNerveArchive {
   return {
     format: "grownerve",
     schema_version: 1,
@@ -29,7 +33,20 @@ export function createArchive(data: FarmData, metadata: { now?: string; exportId
     export_id: metadata.exportId ?? crypto.randomUUID(),
     data: stableData(structuredClone(data)),
     media: [...(metadata.media ?? [])].sort((left, right) => left.id.localeCompare(right.id)),
+    layouts: structuredClone(metadata.layouts ?? []).sort((left, right) => left.facility_id.localeCompare(right.facility_id)),
   };
+}
+
+/** Each layout must belong to a facility in this archive (or the default owner) and pass full layout validation. */
+function validateLayouts(entries: Array<{ facility_id: string; layout: unknown }>, data: FarmData): ArchiveLayout[] {
+  const facilities = new Set(data.facilities.map((facility) => facility.id)), seen = new Set<string>();
+  return entries.map(({ facility_id, layout }) => {
+    if (facility_id !== DEFAULT_LAYOUT_OWNER && !facilities.has(facility_id)) throw new Error(`Layout references unknown facility ${facility_id}`);
+    if (seen.has(facility_id)) throw new Error(`Archive contains two layouts for ${facility_id}`);
+    seen.add(facility_id);
+    try { return { facility_id, layout: validateLayout(layout) }; }
+    catch (cause) { throw new Error(`Layout for ${facility_id} is invalid: ${cause instanceof Error ? cause.message : String(cause)}`); }
+  });
 }
 
 function assertUniqueIds(data: FarmData) {
@@ -62,6 +79,25 @@ function assertReferences(data: FarmData) {
   for (const adjustment of data.inventory_adjustments) if (!inventoryIds.has(adjustment.item_id)) throw new Error(`Inventory adjustment ${adjustment.id} references unknown item`);
 }
 
+/** Integration bindings are optional, but when present they must name a known provider and be unambiguous. */
+function assertIntegrationBindings(data: FarmData) {
+  const seen = new Set<string>();
+  for (const device of data.devices) {
+    const binding = device.integration as unknown;
+    if (binding === undefined) continue;
+    const { provider, external_id: externalId } = (binding ?? {}) as { provider?: unknown; external_id?: unknown };
+    if (!integrationProviders.includes(provider as never)) throw new Error(`Device ${device.id} has an unknown integration provider`);
+    if (typeof externalId !== "string" || !externalId || externalId.length > 256) throw new Error(`Device ${device.id} has an invalid integration identity`);
+    const identity = JSON.stringify([provider, externalId]);
+    if (seen.has(identity)) throw new Error(`Two devices are bound to ${String(provider)} device ${externalId}`);
+    seen.add(identity);
+  }
+  for (const channel of data.channels) {
+    const key = channel.integration_key as unknown;
+    if (key !== undefined && (typeof key !== "string" || !key || key.length > 256)) throw new Error(`Channel ${channel.id} has an invalid integration key`);
+  }
+}
+
 export function validateArchive(input: unknown): GrowNerveArchive {
   const parsed = archiveEnvelope.parse(input);
   if (parsed.schema_version !== 1) throw new Error(`Unsupported archive schema ${parsed.schema_version}`);
@@ -69,7 +105,8 @@ export function validateArchive(input: unknown): GrowNerveArchive {
   const archive = parsed as unknown as GrowNerveArchive;
   assertUniqueIds(archive.data);
   assertReferences(archive.data);
-  return archive;
+  assertIntegrationBindings(archive.data);
+  return { ...archive, layouts: validateLayouts(parsed.layouts ?? [], archive.data) };
 }
 
 export function serializeArchive(archive: GrowNerveArchive): string {

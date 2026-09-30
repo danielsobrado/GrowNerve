@@ -31,6 +31,7 @@ This directory is the implementation blueprint for GrowNerve. Documents are orde
 25. [MCP component authoring and farm editing](25-mcp-component-authoring.md)
 26. [Component taxonomy, capabilities, and information surfaces](26-component-taxonomy-and-capabilities.md)
 27. [Commerce catalog, compatibility, and referral service](27-commerce-catalog-and-referral-service.md)
+28. [Third-party device integrations: Zigbee, Matter, Home Assistant](28-integrations.md)
 
 The ESP32 controller lives in [`firmware/esp32`](../firmware/esp32/README.md).
 

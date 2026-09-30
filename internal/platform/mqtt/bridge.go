@@ -113,7 +113,7 @@ func (bridge *Bridge) PublishCommand(ctx context.Context, deviceID string, comma
 	if err != nil {
 		return err
 	}
-	return bridge.publish(ctx, fmt.Sprintf("grownerve/v1/devices/%s/commands", deviceID), payload, false)
+	return bridge.publish(ctx, farm.CommandTopic(deviceID), payload, false)
 }
 
 func (bridge *Bridge) PublishConfig(ctx context.Context, deviceID string, payload []byte) error {
@@ -126,7 +126,7 @@ func (bridge *Bridge) PublishRaw(ctx context.Context, topic string, payload []by
 
 func (bridge *Bridge) publish(ctx context.Context, topic string, payload []byte, retained bool) error {
 	if !bridge.client.IsConnected() {
-		return errors.New("MQTT broker is unavailable")
+		return fmt.Errorf("MQTT broker is unavailable: %w", farm.ErrTransportUnavailable)
 	}
 	token := bridge.client.Publish(topic, 1, retained, payload)
 	for !token.WaitTimeout(100 * time.Millisecond) {
@@ -199,29 +199,6 @@ func topicDeviceID(topic, suffix string) (string, bool) {
 		return "", false
 	}
 	return deviceID, true
-}
-
-func channelOwnedBy(document *stateDocument, deviceID, channelID string) bool {
-	for _, channel := range document.Channels {
-		if channel.ID == channelID && channel.DeviceID == deviceID {
-			return true
-		}
-	}
-	return false
-}
-
-func storedTime(value any) (time.Time, bool) {
-	switch typed := value.(type) {
-	case time.Time:
-		return typed.UTC(), !typed.IsZero()
-	case string:
-		for _, layout := range []string{time.RFC3339Nano, time.RFC3339} {
-			if parsed, err := time.Parse(layout, typed); err == nil {
-				return parsed.UTC(), true
-			}
-		}
-	}
-	return time.Time{}, false
 }
 
 func (bridge *Bridge) handleTelemetry(_ paho.Client, message paho.Message) {
@@ -304,44 +281,18 @@ func (bridge *Bridge) handleAcknowledgement(_ paho.Client, message paho.Message)
 		bridge.logger.Warn("mqtt_device_identity_mismatch", "topic", message.Topic(), "payload_device", ack.DeviceID)
 		return
 	}
-	receivedAt := bridge.now()
-	if err := bridge.mutate(func(document *stateDocument) error {
-		for _, command := range document.Commands {
-			if command["id"] != ack.CommandID {
-				continue
-			}
-			targetChannel, _ := command["target_channel_id"].(string)
-			if !channelOwnedBy(document, topicDevice, targetChannel) {
-				return errors.New("command_device_mismatch")
-			}
-			if status, _ := command["status"].(string); status == "applied" || status == "rejected" || status == "timed_out" || status == "cancelled" {
-				return errors.New("command_already_final")
-			}
-			expiresAt, valid := storedTime(command["expires_at"])
-			if !valid {
-				return errors.New("command_expiry_invalid")
-			}
-			command["acknowledged_at"] = ack.AcknowledgedAt
-			command["updated_at"] = receivedAt
-			if !expiresAt.After(receivedAt) {
-				command["status"] = "timed_out"
-				command["reason_code"] = "COMMAND_EXPIRED"
-				return nil
-			}
-			switch ack.Result {
-			case "applied":
-				command["status"] = "applied"
-			case "accepted":
-				command["status"] = "acknowledged"
-			default:
-				command["status"] = "rejected"
-			}
-			command["reason_code"] = ack.ReasonCode
-			return nil
-		}
-		return errors.New("unknown_command")
-	}); err == nil {
+	ctx, cancel := context.WithTimeout(context.Background(), mqttStoreTimeout)
+	defer cancel()
+	err := farm.ApplyCommandAcknowledgement(ctx, bridge.store, topicDevice, ack, bridge.now())
+	switch {
+	case err == nil:
 		bridge.notify("commands")
+	case errors.Is(err, farm.ErrInvalidState):
+		bridge.logger.Warn("mqtt_state_invalid")
+	case errors.Is(err, farm.ErrNotFound):
+		bridge.logger.Warn("mqtt_state_load_failed", "error", err)
+	default:
+		bridge.logger.Warn("mqtt_message_rejected", "reason", err)
 	}
 }
 

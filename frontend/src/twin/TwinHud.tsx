@@ -41,12 +41,12 @@ export function TwinHud({ data }: { data: FarmData }) {
   if (readings.length === 0) return null;
 
   return <section className="gn-twin-hud" aria-label="Digital twin telemetry summary">
-    <header><div><span className={`gn-twin-live ${liveCount > 0 ? "is-live" : ""}`} />Telemetry</div><strong>{state}</strong></header>
+    <header><div><span className={`gn-twin-live ${liveCount > 0 ? "is-live" : ""}`} />Telemetry</div><strong className={liveCount === readings.length ? "is-live" : ""}>{state}</strong></header>
     <div className="gn-twin-hud-grid">{readings.map(({ metric, reading }) => {
       if (!reading) return null;
       const Icon = metric.icon;
       return <div className={`gn-twin-hud-metric ${reading.stale ? "is-stale" : ""}`} key={metric.key} title={`${reading.label} · ${reading.stale ? "stale" : reading.quality}`}>
-        <Icon size={14} strokeWidth={1.8} />
+        <span className="gn-twin-hud-icon"><Icon size={12} strokeWidth={2} /></span>
         <span>{metric.label}</span>
         <strong>{reading.displayValue}</strong>
       </div>;

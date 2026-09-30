@@ -136,7 +136,7 @@ func TestStateWriteDoesNotStoreMeasurements(t *testing.T) {
 
 	request := httptest.NewRequest(http.MethodPut, "/api/v1/state", strings.NewReader(read.Body.String()))
 	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("If-Match", read.Header().Get("ETag"))
+	request.Header.Set(farmVersionHeader, read.Header().Get(farmVersionHeader))
 	write := httptest.NewRecorder()
 	handler.ServeHTTP(write, request)
 	if write.Code != http.StatusNoContent {
@@ -167,6 +167,8 @@ func TestSubmittedMeasurementsAreAdoptedNotDropped(t *testing.T) {
 	]}`
 	request := httptest.NewRequest(http.MethodPut, "/api/v1/state", strings.NewReader(body))
 	request.Header.Set("Content-Type", "application/json")
+	// telemetryHandler seeds the store, so the import replaces version 1.
+	request.Header.Set(farmVersionHeader, "1")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusNoContent {

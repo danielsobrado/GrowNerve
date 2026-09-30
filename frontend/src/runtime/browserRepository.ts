@@ -1,5 +1,5 @@
 import Dexie, { type EntityTable } from "dexie";
-import type { FarmData } from "../domain/model";
+import type { FarmData, GrowNerveArchive } from "../domain/model";
 import { validateArchive } from "./archive";
 
 interface Snapshot { key: "current"; data: FarmData; updated_at: string }
@@ -45,9 +45,11 @@ export class BrowserFarmRepository implements FarmRepository {
     return structuredClone(next!);
   }
 
-  async importReplace(input: unknown): Promise<void> {
+  /** Validates and stores the farm data, returning the archive so callers can restore browser-side extras (layouts). */
+  async importReplace(input: unknown): Promise<GrowNerveArchive> {
     const archive = validateArchive(input);
     await this.replace(archive.data);
+    return archive;
   }
 
   async clear(): Promise<void> {

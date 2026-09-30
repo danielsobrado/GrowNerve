@@ -24,6 +24,6 @@ describe("GrowNerve application", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Load pilot example" }));
     await waitFor(() => expect(screen.getByRole("heading", { name: "Farm overview" })).toBeVisible());
     expect(screen.getByRole("button", { name: /3D Twin/ })).toBeVisible();
-    expect(screen.getByText("Browser only")).toBeVisible();
+    expect(screen.getByText("Browser runtime")).toBeVisible();
   });
 });

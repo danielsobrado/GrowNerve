@@ -110,11 +110,32 @@ func (handler *Handler) projectMeasurements(ctx context.Context, state json.RawM
 	if recent == nil {
 		recent = []telemetry.Measurement{}
 	}
+	recent = withLatestPerChannel(ctx, handler.telemetry, recent)
 	projected, err := ReplaceKeys(state, map[string]any{"measurements": recent})
 	if err != nil {
 		return state
 	}
 	return projected
+}
+
+// withLatestPerChannel adds each channel's newest reading when the recent
+// window does not already hold one. A chatty integration plug can otherwise
+// push a sleepy battery sensor out of the window and blank its current value.
+func withLatestPerChannel(ctx context.Context, reader TelemetryReader, recent []telemetry.Measurement) []telemetry.Measurement {
+	latest, err := reader.Latest(ctx)
+	if err != nil || len(latest) == 0 {
+		return recent
+	}
+	present := make(map[string]bool, len(recent))
+	for _, measurement := range recent {
+		present[measurement.ChannelID] = true
+	}
+	for _, measurement := range latest {
+		if !present[measurement.ChannelID] {
+			recent = append(recent, measurement)
+		}
+	}
+	return recent
 }
 
 func optionalTime(value string) (time.Time, error) {

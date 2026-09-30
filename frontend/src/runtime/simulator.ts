@@ -39,7 +39,8 @@ function pseudoRandom(seed: number) {
 
 export function tickSimulator(source: FarmData, at = new Date().toISOString(), seed = Date.now()): FarmData {
   const data = structuredClone(source);
-  const activeDeviceIds = new Set(data.devices.filter((device) => device.online).map((device) => device.id));
+  // Integration devices report real readings through the server; the simulator never invents values for them.
+  const activeDeviceIds = new Set(data.devices.filter((device) => device.online && !device.integration).map((device) => device.id));
   const offsets: Record<string, number> = { "air.temperature": 22.5, "air.humidity": 68, "water.temperature": 20.8, "water.level": data.reservoirs[0]?.level_percent ?? 70 };
   data.channels.filter((channel) => channel.kind === "measurement" && activeDeviceIds.has(channel.device_id)).forEach((channel, index) => {
     const previous = [...data.measurements].reverse().find((measurement) => measurement.channel_id === channel.id);

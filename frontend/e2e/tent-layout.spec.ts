@@ -12,7 +12,7 @@ test('resizes a tent and objects, snaps placement, undoes and restores saved lay
     if ((page.viewportSize()?.width ?? 1280) <= 780) await page.getByRole('button', { name: 'Open navigation' }).click();
     await page.locator('.gn-sidebar').getByRole('button', { name: '3D Twin', exact: true }).click();
     await page.getByRole('button', { name: 'Tent layout', exact: true }).click();
-    await expect(page.locator('canvas')).toHaveAttribute('data-tent-layout', /"version":1/, { timeout: 60_000 });
+    await expect(page.locator('canvas')).toHaveAttribute('data-tent-layout', /"version":2/, { timeout: 60_000 });
   };
   await openTwin();
   await page.getByRole('button', { name: 'Add to tent' }).click();
@@ -42,7 +42,7 @@ test('resizes a tent and objects, snaps placement, undoes and restores saved lay
   await page.getByRole('button', { name: 'Undo', exact: true }).click();
   await expect(page.locator('canvas')).toHaveAttribute('data-tent-layout', /"rotation":0/);
   await page.getByRole('button', { name: 'Redo', exact: true }).click();
-  await page.getByText('Tent dimensions ·', { exact: false }).click();
+  await page.getByText('Grow tent ·', { exact: false }).click();
   await edit('Tent width', '300');
   await edit('Tent depth', '200');
   await expect(page.locator('canvas')).toHaveAttribute('data-tent-layout', /"tent":\[3,2.6,2\]/);

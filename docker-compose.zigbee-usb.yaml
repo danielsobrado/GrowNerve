@@ -1,0 +1,11 @@
+# USB Zigbee coordinator passthrough for the zigbee profile:
+#   ZIGBEE_USB_DEVICE=/dev/serial/by-id/usb-... docker compose -f docker-compose.yaml #     -f docker-compose.zigbee-usb.yaml --profile zigbee up
+# Kept separate because a missing device path stops compose entirely. Docker
+# Desktop on Windows needs usbipd to expose the stick; a network coordinator
+# (ZIGBEE_SERIAL_PORT=tcp://host:6638) avoids that.
+services:
+  zigbee2mqtt:
+    environment:
+      ZIGBEE2MQTT_CONFIG_SERIAL_PORT: /dev/ttyZigbee
+    devices:
+      - ${ZIGBEE_USB_DEVICE:?set ZIGBEE_USB_DEVICE to the coordinator's /dev/serial/by-id path}:/dev/ttyZigbee

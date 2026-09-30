@@ -1,6 +1,7 @@
-import { emptyFarmData, type FarmCommand, type FarmData, type Measurement } from "../domain/model";
+import { emptyFarmData, type FarmCommand, type FarmData, type IntegrationProvider, type Measurement } from "../domain/model";
 import type { CommandIntent } from "./simulator";
 import type { FarmRepository } from "./browserRepository";
+import type { AdoptRequest, DiscoveredDevice, IntegrationClient, IntegrationStatus } from "./integrations";
 
 const COMMAND_TRANSPORT_ATTEMPTS = 2;
 const FARM_VERSION_HEADER = "X-Farm-Version";
@@ -28,7 +29,7 @@ export interface ServerRepositoryOptions {
   onUnauthorized?: () => void;
 }
 
-export class ServerFarmRepository implements FarmRepository {
+export class ServerFarmRepository implements FarmRepository, IntegrationClient {
   private readonly listeners = new Set<() => void>();
   private readonly options: ServerRepositoryOptions;
   private readonly baseURL: string;
@@ -158,6 +159,41 @@ export class ServerFarmRepository implements FarmRepository {
     this.unauthorizedHandled = false;
     const payload = await response.json() as { buckets?: MeasurementBucket[] };
     return payload.buckets ?? [];
+  }
+
+  async listIntegrations(): Promise<IntegrationStatus[]> {
+    return this.getJSON<IntegrationStatus[]>("/api/v1/integrations", "Integrations failed");
+  }
+
+  async listDiscovered(provider: IntegrationProvider): Promise<DiscoveredDevice[]> {
+    return this.getJSON<DiscoveredDevice[]>(`/api/v1/integrations/${encodeURIComponent(provider)}/devices`, "Device discovery failed");
+  }
+
+  async adoptDevice(provider: IntegrationProvider, externalId: string, request: AdoptRequest): Promise<void> {
+    await this.postJSON(`/api/v1/integrations/${encodeURIComponent(provider)}/devices/${encodeURIComponent(externalId)}/adopt`, request, "Adoption failed");
+    // Adoption changed the farm document; listeners reload it.
+    this.emit();
+  }
+
+  async permitJoin(provider: IntegrationProvider, seconds: number): Promise<string> {
+    const payload = await this.postJSON<{ until: string }>(`/api/v1/integrations/${encodeURIComponent(provider)}/permit-join`, { seconds }, "Pairing failed");
+    return payload.until;
+  }
+
+  private async getJSON<T>(path: string, fallback: string): Promise<T> {
+    const response = await fetch(`${this.baseURL}${path}`, { headers: this.headers() });
+    if (!response.ok) throw await this.failure(response, fallback);
+    this.unauthorizedHandled = false;
+    return await response.json() as T;
+  }
+
+  private async postJSON<T>(path: string, body: unknown, fallback: string): Promise<T> {
+    const response = await fetch(`${this.baseURL}${path}`, {
+      method: "POST", headers: this.headers({ "Content-Type": "application/json" }), body: JSON.stringify(body),
+    });
+    if (!response.ok) throw await this.failure(response, fallback);
+    this.unauthorizedHandled = false;
+    return await response.json() as T;
   }
 
   private historyURL(query: HistoryQuery): string {

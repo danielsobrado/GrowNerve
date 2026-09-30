@@ -1,10 +1,11 @@
-.gn-tent-editor { flex-shrink: 0; max-height: 300px; overflow-y: auto; background: #14231d; color: #d5e2cf; font-size: 11px; }
-.gn-tent-editor summary { cursor: pointer; padding: 8px 10px; }
-.gn-tent-editor input { width: 64px; min-height: 34px; background: #213128; color: inherit; border: 1px solid #72897055; border-radius: 4px; padding: 4px; }
-.gn-tent-editor p { margin: 0; padding: 7px 10px; color: #c1d8b4; }
+.gn-tent-editor { flex-shrink: 0; max-height: 300px; overflow-y: auto; background: #0c100d; color: #c3cbc2; font-size: 11px; }
+.gn-tent-editor summary { cursor: pointer; padding: 8px 14px; color: #9be07f; }
+.gn-tent-editor input { width: 84px; min-height: 34px; background: rgba(255,255,255,.035); color: #eef2ea; border: 1px solid rgba(255,255,255,.08); border-radius: 999px; padding: 4px 12px; }
+.gn-tent-editor p { margin: 0; padding: 7px 10px; color: #7e8a80; }
 .gn-tent-editor button:disabled { opacity: .4; cursor: default; }
 .gn-twin-layout:has(.gn-tent-editor) { height: auto; }
 .gn-twin-card:has(.gn-tent-editor) { height: auto; }
 .gn-model-viewer:has(.gn-tent-editor) { min-height: 850px; }
 .gn-model-viewer:has(.gn-tent-editor) > .gn-twin-wrap { min-height: 480px; }
 @media (pointer: coarse) { .gn-tent-editor input { min-height: 44px; } }
+.gn-tent-editor input[type="text"] { width: 180px; }

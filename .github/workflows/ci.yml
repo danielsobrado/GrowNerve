@@ -134,7 +134,7 @@ jobs:
         run: |
           go test -count=1 -v \
             -run "Postgres|RealBroker|Retained|UnknownDevice|LatestProjection|UnknownChannel|Acknowledgement" \
-            ./internal/farm/ ./internal/telemetry/ ./internal/platform/mqtt/ | tee integration.log
+            ./internal/farm/ ./internal/telemetry/ ./internal/platform/mqtt/ ./internal/platform/integrations/... | tee integration.log
           if grep -q -- "--- SKIP" integration.log; then
             echo "::error::Integration tests skipped; the database or broker was not reachable."
             exit 1

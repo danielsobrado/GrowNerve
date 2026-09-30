@@ -1,3 +1,4 @@
+import type { TentLayout } from "../twin/tentLayout";
 export type UUID = string;
 export type RuntimeMode = "browser" | "server";
 export type Quality = "good" | "suspect" | "stale" | "calibrating" | "fault" | "unknown";
@@ -15,9 +16,14 @@ export interface Recipe { id: UUID; crop_id: UUID; variety_id?: UUID; name: stri
 export interface RecipeVersion { id: UUID; recipe_id: UUID; version: number; status: "draft" | "published"; published_at?: string }
 export interface RecipeStage { id: UUID; recipe_version_id: UUID; key: string; name: string; sort_order: number; guidance_days?: number }
 export interface Setpoint { id: UUID; stage_id: UUID; channel_key: string; unit: string; minimum?: number; maximum?: number; warning_duration_minutes?: number; stale_after_seconds: number }
-export interface Device { id: UUID; zone_id: UUID; name: string; type: "controller" | "light" | "fan" | "air_pump" | "sensor"; online: boolean; simulated: boolean; output_percent?: number; state?: boolean; last_heartbeat: string; firmware_version: string; active_config_version: string }
-export interface Channel { id: UUID; device_id: UUID; entity_type: EntityType; entity_id: UUID; key: string; name: string; kind: "measurement" | "state" | "command" | "counter"; value_type: "number" | "boolean" | "enum"; unit?: string; dimension?: string; minimum?: number; maximum?: number; safe_minimum?: number; safe_maximum?: number; stale_after_seconds: number }
-export interface ChannelBinding { id: UUID; channel_id: UUID; device_id: UUID; valid_from: string; valid_to?: string }
+export type IntegrationProvider = "zigbee2mqtt" | "matter" | "home_assistant";
+export const integrationProviders = ["zigbee2mqtt", "matter", "home_assistant"] as const satisfies readonly IntegrationProvider[];
+/** Present on a device that a third-party integration manages (server mode only; see docs/28-integrations.md). */
+export interface DeviceIntegration { provider: IntegrationProvider; external_id: string; manufacturer?: string; model?: string; adopted_at: string }
+export interface Device { id: UUID; zone_id: UUID; name: string; type: "controller" | "light" | "fan" | "air_pump" | "sensor"; online: boolean; simulated: boolean; output_percent?: number; state?: boolean; last_heartbeat: string; firmware_version: string; active_config_version: string; integration?: DeviceIntegration }
+/** integration_key names the provider capability (Zigbee2MQTT property, Matter attribute path, Home Assistant entity) behind an integration device's channel. */
+export interface Channel { id: UUID; device_id: UUID; entity_type: EntityType; entity_id: UUID; key: string; name: string; kind: "measurement" | "state" | "command" | "counter"; value_type: "number" | "boolean" | "enum"; unit?: string; dimension?: string; minimum?: number; maximum?: number; safe_minimum?: number; safe_maximum?: number; stale_after_seconds: number; integration_key?: string }
+export interface ChannelBinding { id: UUID; channel_id: UUID; device_id: UUID; valid_from: string; valid_to?: string; integration_key?: string }
 export interface Measurement { id?: UUID; channel_id: UUID; observed_at: string; received_at?: string; value: number; unit: string; quality: Quality; sequence?: number; source_device_id?: UUID }
 export interface FarmEvent { id: UUID; type: string; occurred_at: string; actor: string; entity_type: EntityType; entity_id: UUID; summary: string; notes?: string }
 export interface EventQuantity { id: UUID; event_id: UUID; value: number; unit: string; material?: string }
@@ -70,7 +76,11 @@ export interface GrowNerveArchive {
   export_id: UUID;
   data: FarmData;
   media: MediaObject[];
+  /** Tent or outdoor layouts keyed by facility (or "default"); optional so older archives still import. */
+  layouts?: ArchiveLayout[];
 }
+
+export interface ArchiveLayout { facility_id: string; layout: TentLayout }
 
 export const farmDataKeys = [
   "facilities", "zones", "reservoirs", "crops", "varieties", "grow_cycles", "plant_positions",

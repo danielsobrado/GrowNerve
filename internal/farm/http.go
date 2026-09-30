@@ -418,21 +418,31 @@ func (handler *Handler) publishAccepted(ctx context.Context, intent commandInten
 	outcome.record["updated_at"] = handler.now()
 	encoded, _ := json.Marshal(outcome.record)
 	commandID := outcome.record["id"].(string)
+	current := encoded
 	_ = Mutate(ctx, handler.store, func(rawState json.RawMessage) (json.RawMessage, error) {
+		current = encoded
 		var state commandState
 		if err := json.Unmarshal(rawState, &state); err != nil {
 			return nil, err
 		}
 		for index, existing := range state.Commands {
 			var record map[string]any
-			if json.Unmarshal(existing, &record) == nil && record["id"] == commandID {
-				state.Commands[index] = encoded
-				return replaceKey(rawState, "commands", state.Commands)
+			if json.Unmarshal(existing, &record) != nil || record["id"] != commandID {
+				continue
 			}
+			// A fast transport (an in-process integration adapter) can report
+			// the result before this write lands. Only a still-pending record
+			// moves to published; anything further along is kept as it is.
+			if record["status"] != "pending" {
+				current = existing
+				return rawState, nil
+			}
+			state.Commands[index] = encoded
+			return replaceKey(rawState, "commands", state.Commands)
 		}
 		return rawState, nil
 	})
-	outcome.encoded = encoded
+	outcome.encoded = current
 }
 
 func replaceKey(state json.RawMessage, key string, value any) (json.RawMessage, error) {
@@ -633,6 +643,11 @@ func (handler *Handler) projectRegistry(writer http.ResponseWriter, request *htt
 		return false
 	}
 	return true
+}
+
+// WriteProblem writes an RFC 9457 problem response in the API's house format.
+func WriteProblem(writer http.ResponseWriter, request *http.Request, status int, code, detail string) {
+	writeProblem(writer, request, status, code, detail)
 }
 
 func writeProblem(writer http.ResponseWriter, request *http.Request, status int, code, detail string) {

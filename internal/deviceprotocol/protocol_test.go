@@ -64,9 +64,11 @@ func TestCommandRejectsStaleAndOverlongWindows(t *testing.T) {
 	now := time.Date(2026, 9, 2, 2, 0, 0, 0, time.UTC)
 	base := Command{ProtocolVersion: Version, CommandID: deviceID, TargetChannelID: channelID, Type: "set_percent", Value: 50}
 
+	// The oldest command still accepted: issued almost a full lifetime ago and
+	// expiring exactly one lifetime after issue.
 	valid := base
-	valid.IssuedAt = now.Add(-MaximumCommandLifetime)
-	valid.ExpiresAt = now.Add(time.Second)
+	valid.IssuedAt = now.Add(-MaximumCommandLifetime + time.Second)
+	valid.ExpiresAt = valid.IssuedAt.Add(MaximumCommandLifetime)
 	if err := valid.Validate(now); err != nil {
 		t.Fatalf("boundary command rejected: %v", err)
 	}
@@ -127,10 +129,10 @@ func validEdgeConfig() EdgeConfig {
 		ConfigVersion:   "v2",
 		IssuedAt:        time.Now().UTC(),
 		Config: EdgeSettings{
-			TimezonePOSIX:     "GST-4",
-			Photoperiod:       &Photoperiod{OnHour: 6, OffHour: 23, ChannelID: channelID},
-			FanMinimumPercent: &minimum,
-			SafeOutputs:       map[string]float64{channelID: 0},
+			TimezonePOSIX:            "GST-4",
+			Photoperiod:              &Photoperiod{OnHour: 6, OffHour: 23, ChannelID: channelID},
+			FanMinimumPercent:        &minimum,
+			SafeOutputs:              map[string]float64{channelID: 0},
 			TelemetryIntervalSeconds: 10,
 			CommandTimeoutSeconds:    300,
 		},

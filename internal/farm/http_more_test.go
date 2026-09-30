@@ -51,8 +51,13 @@ func TestStateHandlerReadAndWriteFailures(t *testing.T) {
 	if got := makeRequest(NewHandler(NewMemoryStore()), http.MethodPut, "/api/v1/state", ``, "application/json").Code; got != http.StatusBadRequest {
 		t.Fatalf("empty body = %d", got)
 	}
-	if got := makeRequest(NewHandler(failingStore{saveErr: errors.New("write")}), http.MethodPut, "/api/v1/state", `{}`, "application/json").Code; got != http.StatusInternalServerError {
-		t.Fatalf("failed PUT = %d", got)
+	failedWrite := httptest.NewRequest(http.MethodPut, "/api/v1/state", strings.NewReader(`{}`))
+	failedWrite.Header.Set("Content-Type", "application/json")
+	failedWrite.Header.Set(farmVersionHeader, "1")
+	response := httptest.NewRecorder()
+	NewHandler(failingStore{saveErr: errors.New("write")}).ServeHTTP(response, failedWrite)
+	if response.Code != http.StatusInternalServerError {
+		t.Fatalf("failed PUT = %d: %s", response.Code, response.Body.String())
 	}
 }
 

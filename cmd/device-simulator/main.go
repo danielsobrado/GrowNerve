@@ -77,7 +77,18 @@ func run() error {
 	interval := flag.Duration("interval", 10*time.Second, "telemetry interval")
 	username := flag.String("username", os.Getenv("GROWNERVE_MQTT_USERNAME"), "broker username")
 	password := flag.String("password", os.Getenv("GROWNERVE_MQTT_PASSWORD"), "broker password")
+	mode := flag.String("mode", "esp32", "what to impersonate: esp32 (GrowNerve controller) or z2m (a Zigbee2MQTT bridge)")
+	baseTopic := flag.String("z2m-base-topic", "zigbee2mqtt", "Zigbee2MQTT base topic in z2m mode")
 	flag.Parse()
+	switch *mode {
+	case "esp32":
+	case "z2m":
+		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		defer stop()
+		return runZigbee2MQTT(ctx, *broker, *username, *password, *baseTopic, *interval)
+	default:
+		return fmt.Errorf("mode must be esp32 or z2m, not %q", *mode)
+	}
 	if _, err := uuid.Parse(*deviceID); err != nil {
 		return fmt.Errorf("device-id: %w", err)
 	}

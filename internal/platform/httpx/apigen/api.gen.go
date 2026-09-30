@@ -20,6 +20,71 @@ const (
 	BearerAuthScopes = "bearerAuth.Scopes"
 )
 
+// Defines values for AdoptChannelEntityType.
+const (
+	AdoptChannelEntityTypeChannel       AdoptChannelEntityType = "channel"
+	AdoptChannelEntityTypeDevice        AdoptChannelEntityType = "device"
+	AdoptChannelEntityTypeFacility      AdoptChannelEntityType = "facility"
+	AdoptChannelEntityTypeGrowCycle     AdoptChannelEntityType = "grow_cycle"
+	AdoptChannelEntityTypeInventoryItem AdoptChannelEntityType = "inventory_item"
+	AdoptChannelEntityTypePlantPosition AdoptChannelEntityType = "plant_position"
+	AdoptChannelEntityTypeReservoir     AdoptChannelEntityType = "reservoir"
+	AdoptChannelEntityTypeZone          AdoptChannelEntityType = "zone"
+)
+
+// Defines values for AdoptRequestType.
+const (
+	AdoptRequestTypeAirPump    AdoptRequestType = "air_pump"
+	AdoptRequestTypeController AdoptRequestType = "controller"
+	AdoptRequestTypeFan        AdoptRequestType = "fan"
+	AdoptRequestTypeLight      AdoptRequestType = "light"
+	AdoptRequestTypeSensor     AdoptRequestType = "sensor"
+)
+
+// Defines values for DiscoveredDevicePowerSource.
+const (
+	Battery DiscoveredDevicePowerSource = "battery"
+	Mains   DiscoveredDevicePowerSource = "mains"
+)
+
+// Defines values for DiscoveredDeviceSuggestedType.
+const (
+	DiscoveredDeviceSuggestedTypeAirPump    DiscoveredDeviceSuggestedType = "air_pump"
+	DiscoveredDeviceSuggestedTypeController DiscoveredDeviceSuggestedType = "controller"
+	DiscoveredDeviceSuggestedTypeFan        DiscoveredDeviceSuggestedType = "fan"
+	DiscoveredDeviceSuggestedTypeLight      DiscoveredDeviceSuggestedType = "light"
+	DiscoveredDeviceSuggestedTypeSensor     DiscoveredDeviceSuggestedType = "sensor"
+)
+
+// Defines values for IntegrationCapabilityKind.
+const (
+	IntegrationCapabilityKindCommand     IntegrationCapabilityKind = "command"
+	IntegrationCapabilityKindMeasurement IntegrationCapabilityKind = "measurement"
+	IntegrationCapabilityKindState       IntegrationCapabilityKind = "state"
+)
+
+// Defines values for IntegrationCapabilityValueType.
+const (
+	Boolean IntegrationCapabilityValueType = "boolean"
+	Number  IntegrationCapabilityValueType = "number"
+)
+
+// Defines values for IntegrationProvider.
+const (
+	HomeAssistant IntegrationProvider = "home_assistant"
+	Matter        IntegrationProvider = "matter"
+	Zigbee2mqtt   IntegrationProvider = "zigbee2mqtt"
+)
+
+// Defines values for IntegrationStatusState.
+const (
+	Connected  IntegrationStatusState = "connected"
+	Connecting IntegrationStatusState = "connecting"
+	Degraded   IntegrationStatusState = "degraded"
+	Disabled   IntegrationStatusState = "disabled"
+	Error      IntegrationStatusState = "error"
+)
+
 // Defines values for MeasurementQuality.
 const (
 	Calibrating MeasurementQuality = "calibrating"
@@ -38,6 +103,46 @@ const (
 	Imagewebp MediaObjectMimeType = "image/webp"
 )
 
+// Defines values for ReplaceFarmStateParamsIfNoneMatch.
+const (
+	Asterisk ReplaceFarmStateParamsIfNoneMatch = "*"
+)
+
+// AdoptChannel defines model for AdoptChannel.
+type AdoptChannel struct {
+	CapabilityKey string                  `json:"capability_key"`
+	EntityId      *string                 `json:"entity_id,omitempty"`
+	EntityType    *AdoptChannelEntityType `json:"entity_type,omitempty"`
+
+	// Key Farm channel key; defaults to the capability's suggestion. Unique per facility.
+	Key               *string  `json:"key,omitempty"`
+	Name              *string  `json:"name,omitempty"`
+	SafeMaximum       *float32 `json:"safe_maximum,omitempty"`
+	SafeMinimum       *float32 `json:"safe_minimum,omitempty"`
+	StaleAfterSeconds *int     `json:"stale_after_seconds,omitempty"`
+}
+
+// AdoptChannelEntityType defines model for AdoptChannel.EntityType.
+type AdoptChannelEntityType string
+
+// AdoptRequest defines model for AdoptRequest.
+type AdoptRequest struct {
+	AcknowledgeNoEdgeFailsafe *bool             `json:"acknowledge_no_edge_failsafe,omitempty"`
+	Channels                  []AdoptChannel    `json:"channels"`
+	Name                      *string           `json:"name,omitempty"`
+	Type                      *AdoptRequestType `json:"type,omitempty"`
+	ZoneId                    string            `json:"zone_id"`
+}
+
+// AdoptRequestType defines model for AdoptRequest.Type.
+type AdoptRequestType string
+
+// AdoptResult defines model for AdoptResult.
+type AdoptResult struct {
+	Channels []map[string]interface{} `json:"channels"`
+	Device   map[string]interface{}   `json:"device"`
+}
+
 // Bucket defines model for Bucket.
 type Bucket struct {
 	Average   float32   `json:"average"`
@@ -53,6 +158,27 @@ type BucketPage struct {
 	Buckets       []Bucket           `json:"buckets"`
 	ChannelId     openapi_types.UUID `json:"channelId"`
 }
+
+// DiscoveredDevice defines model for DiscoveredDevice.
+type DiscoveredDevice struct {
+	AdoptedDeviceId *openapi_types.UUID           `json:"adopted_device_id,omitempty"`
+	Available       bool                          `json:"available"`
+	Capabilities    []IntegrationCapability       `json:"capabilities"`
+	ExternalId      string                        `json:"external_id"`
+	Firmware        *string                       `json:"firmware,omitempty"`
+	Manufacturer    *string                       `json:"manufacturer,omitempty"`
+	Model           *string                       `json:"model,omitempty"`
+	Name            string                        `json:"name"`
+	PowerSource     *DiscoveredDevicePowerSource  `json:"power_source,omitempty"`
+	Provider        IntegrationProvider           `json:"provider"`
+	SuggestedType   DiscoveredDeviceSuggestedType `json:"suggested_type"`
+}
+
+// DiscoveredDevicePowerSource defines model for DiscoveredDevice.PowerSource.
+type DiscoveredDevicePowerSource string
+
+// DiscoveredDeviceSuggestedType defines model for DiscoveredDevice.SuggestedType.
+type DiscoveredDeviceSuggestedType string
 
 // Facility defines model for Facility.
 type Facility struct {
@@ -95,6 +221,48 @@ type Health struct {
 	Checks *map[string]string `json:"checks,omitempty"`
 	Status string             `json:"status"`
 }
+
+// IntegrationCapability defines model for IntegrationCapability.
+type IntegrationCapability struct {
+	Diagnostic *bool   `json:"diagnostic,omitempty"`
+	Dimension  *string `json:"dimension,omitempty"`
+
+	// Key Becomes the channel's integration_key.
+	Key                 string                         `json:"key"`
+	Kind                IntegrationCapabilityKind      `json:"kind"`
+	Label               string                         `json:"label"`
+	Maximum             *float32                       `json:"maximum,omitempty"`
+	Minimum             *float32                       `json:"minimum,omitempty"`
+	Note                *string                        `json:"note,omitempty"`
+	SuggestedChannelKey string                         `json:"suggested_channel_key"`
+	Unit                string                         `json:"unit"`
+	ValueType           IntegrationCapabilityValueType `json:"value_type"`
+}
+
+// IntegrationCapabilityKind defines model for IntegrationCapability.Kind.
+type IntegrationCapabilityKind string
+
+// IntegrationCapabilityValueType defines model for IntegrationCapability.ValueType.
+type IntegrationCapabilityValueType string
+
+// IntegrationProvider defines model for IntegrationProvider.
+type IntegrationProvider string
+
+// IntegrationStatus defines model for IntegrationStatus.
+type IntegrationStatus struct {
+	AdoptedCount        int                    `json:"adopted_count"`
+	Detail              *string                `json:"detail,omitempty"`
+	DeviceCount         int                    `json:"device_count"`
+	Enabled             bool                   `json:"enabled"`
+	PermitJoinSupported bool                   `json:"permit_join_supported"`
+	PermitJoinUntil     *time.Time             `json:"permit_join_until,omitempty"`
+	Provider            IntegrationProvider    `json:"provider"`
+	Since               time.Time              `json:"since"`
+	State               IntegrationStatusState `json:"state"`
+}
+
+// IntegrationStatusState defines model for IntegrationStatus.State.
+type IntegrationStatusState string
 
 // Measurement defines model for Measurement.
 type Measurement struct {
@@ -144,6 +312,7 @@ type Problem struct {
 
 // CreateCommandJSONBody defines parameters for CreateCommand.
 type CreateCommandJSONBody struct {
+	// ExpiresAt Optional absolute expiry. Command lifetime is capped at five minutes.
 	ExpiresAt       *time.Time                  `json:"expiresAt,omitempty"`
 	Reason          string                      `json:"reason"`
 	TargetChannelId openapi_types.UUID          `json:"targetChannelId"`
@@ -152,6 +321,7 @@ type CreateCommandJSONBody struct {
 
 // CreateCommandParams defines parameters for CreateCommand.
 type CreateCommandParams struct {
+	// IdempotencyKey Retry key bound to one normalized command request. Reusing it for different content returns 409.
 	IdempotencyKey string `json:"Idempotency-Key"`
 }
 
@@ -164,6 +334,11 @@ type CreateCommandJSONBodyValue1 = bool
 // CreateCommandJSONBody_Value defines parameters for CreateCommand.
 type CreateCommandJSONBody_Value struct {
 	union json.RawMessage
+}
+
+// PermitJoinJSONBody defines parameters for PermitJoin.
+type PermitJoinJSONBody struct {
+	Seconds int `json:"seconds"`
 }
 
 // GetMeasurementHistoryParams defines parameters for GetMeasurementHistory.
@@ -182,11 +357,24 @@ type UploadMediaMultipartBody struct {
 
 // ReplaceFarmStateParams defines parameters for ReplaceFarmState.
 type ReplaceFarmStateParams struct {
-	IfMatch *string `json:"If-Match,omitempty"`
+	// XFarmVersion Version returned by the latest successful GET or PUT. Required when replacing existing state.
+	XFarmVersion *string `json:"X-Farm-Version,omitempty"`
+
+	// IfNoneMatch Use * when creating the first farm so creation cannot overwrite an existing state.
+	IfNoneMatch *ReplaceFarmStateParamsIfNoneMatch `json:"If-None-Match,omitempty"`
 }
+
+// ReplaceFarmStateParamsIfNoneMatch defines parameters for ReplaceFarmState.
+type ReplaceFarmStateParamsIfNoneMatch string
 
 // CreateCommandJSONRequestBody defines body for CreateCommand for application/json ContentType.
 type CreateCommandJSONRequestBody CreateCommandJSONBody
+
+// AdoptDiscoveredDeviceJSONRequestBody defines body for AdoptDiscoveredDevice for application/json ContentType.
+type AdoptDiscoveredDeviceJSONRequestBody = AdoptRequest
+
+// PermitJoinJSONRequestBody defines body for PermitJoin for application/json ContentType.
+type PermitJoinJSONRequestBody PermitJoinJSONBody
 
 // UploadMediaMultipartRequestBody defines body for UploadMedia for multipart/form-data ContentType.
 type UploadMediaMultipartRequestBody UploadMediaMultipartBody
@@ -220,6 +408,18 @@ type ServerInterface interface {
 	// List grow cycles
 	// (GET /api/v1/grow-cycles)
 	ListGrowCycles(w http.ResponseWriter, r *http.Request)
+	// List integration providers and their connection state
+	// (GET /api/v1/integrations)
+	ListIntegrations(w http.ResponseWriter, r *http.Request)
+	// List the devices a provider knows, adopted or not
+	// (GET /api/v1/integrations/{provider}/devices)
+	ListDiscoveredDevices(w http.ResponseWriter, r *http.Request, provider IntegrationProvider)
+	// Adopt a discovered device as a farm device with channels
+	// (POST /api/v1/integrations/{provider}/devices/{externalId}/adopt)
+	AdoptDiscoveredDevice(w http.ResponseWriter, r *http.Request, provider IntegrationProvider, externalId string)
+	// Open the provider's network to new devices
+	// (POST /api/v1/integrations/{provider}/permit-join)
+	PermitJoin(w http.ResponseWriter, r *http.Request, provider IntegrationProvider)
 	// List measurements
 	// (GET /api/v1/measurements)
 	ListMeasurements(w http.ResponseWriter, r *http.Request)
@@ -451,6 +651,128 @@ func (siw *ServerInterfaceWrapper) ListGrowCycles(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListGrowCycles(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListIntegrations operation middleware
+func (siw *ServerInterfaceWrapper) ListIntegrations(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListIntegrations(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListDiscoveredDevices operation middleware
+func (siw *ServerInterfaceWrapper) ListDiscoveredDevices(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "provider" -------------
+	var provider IntegrationProvider
+
+	err = runtime.BindStyledParameterWithOptions("simple", "provider", r.PathValue("provider"), &provider, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "provider", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListDiscoveredDevices(w, r, provider)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AdoptDiscoveredDevice operation middleware
+func (siw *ServerInterfaceWrapper) AdoptDiscoveredDevice(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "provider" -------------
+	var provider IntegrationProvider
+
+	err = runtime.BindStyledParameterWithOptions("simple", "provider", r.PathValue("provider"), &provider, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "provider", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "externalId" -------------
+	var externalId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "externalId", r.PathValue("externalId"), &externalId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "externalId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AdoptDiscoveredDevice(w, r, provider, externalId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PermitJoin operation middleware
+func (siw *ServerInterfaceWrapper) PermitJoin(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "provider" -------------
+	var provider IntegrationProvider
+
+	err = runtime.BindStyledParameterWithOptions("simple", "provider", r.PathValue("provider"), &provider, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "provider", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PermitJoin(w, r, provider)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -699,22 +1021,41 @@ func (siw *ServerInterfaceWrapper) ReplaceFarmState(w http.ResponseWriter, r *ht
 
 	headers := r.Header
 
-	// ------------- Optional header parameter "If-Match" -------------
-	if valueList, found := headers[http.CanonicalHeaderKey("If-Match")]; found {
-		var IfMatch string
+	// ------------- Optional header parameter "X-Farm-Version" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-Farm-Version")]; found {
+		var XFarmVersion string
 		n := len(valueList)
 		if n != 1 {
-			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "If-Match", Count: n})
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "X-Farm-Version", Count: n})
 			return
 		}
 
-		err = runtime.BindStyledParameterWithOptions("simple", "If-Match", valueList[0], &IfMatch, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false})
+		err = runtime.BindStyledParameterWithOptions("simple", "X-Farm-Version", valueList[0], &XFarmVersion, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false})
 		if err != nil {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "If-Match", Err: err})
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "X-Farm-Version", Err: err})
 			return
 		}
 
-		params.IfMatch = &IfMatch
+		params.XFarmVersion = &XFarmVersion
+
+	}
+
+	// ------------- Optional header parameter "If-None-Match" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("If-None-Match")]; found {
+		var IfNoneMatch ReplaceFarmStateParamsIfNoneMatch
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "If-None-Match", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "If-None-Match", valueList[0], &IfNoneMatch, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "If-None-Match", Err: err})
+			return
+		}
+
+		params.IfNoneMatch = &IfNoneMatch
 
 	}
 
@@ -925,6 +1266,10 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("GET "+options.BaseURL+"/api/v1/events", wrapper.ListEvents)
 	m.HandleFunc("GET "+options.BaseURL+"/api/v1/facilities", wrapper.ListFacilities)
 	m.HandleFunc("GET "+options.BaseURL+"/api/v1/grow-cycles", wrapper.ListGrowCycles)
+	m.HandleFunc("GET "+options.BaseURL+"/api/v1/integrations", wrapper.ListIntegrations)
+	m.HandleFunc("GET "+options.BaseURL+"/api/v1/integrations/{provider}/devices", wrapper.ListDiscoveredDevices)
+	m.HandleFunc("POST "+options.BaseURL+"/api/v1/integrations/{provider}/devices/{externalId}/adopt", wrapper.AdoptDiscoveredDevice)
+	m.HandleFunc("POST "+options.BaseURL+"/api/v1/integrations/{provider}/permit-join", wrapper.PermitJoin)
 	m.HandleFunc("GET "+options.BaseURL+"/api/v1/measurements", wrapper.ListMeasurements)
 	m.HandleFunc("GET "+options.BaseURL+"/api/v1/measurements/history", wrapper.GetMeasurementHistory)
 	m.HandleFunc("GET "+options.BaseURL+"/api/v1/measurements/latest", wrapper.ListLatestMeasurements)

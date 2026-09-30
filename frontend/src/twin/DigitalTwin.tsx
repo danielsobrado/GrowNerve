@@ -13,12 +13,14 @@ import { RefinedGeometry, type RefinedModel } from "./models/RefinedGeometry";
 import { HydroponicTower } from "./models/HydroponicTower";
 import { GrowOptions } from "./models/GrowOptions";
 import { ClimateSystems, type ClimateConfig } from "./models/ClimateSystems";
-import { TentDesignerControls, TentDesignerScene, useTentDesigner } from "./TentDesigner";
+import { TentDesignerControls, TentDesignerScene } from "./TentDesigner";
+import type { TentEditor } from "./tentEditor";
 import { type TwinPerformanceProfile, useTwinPerformanceProfile } from "./performance";
 import { actionsForProfile, entityKey, sceneBindings } from "./sceneState";
 import { latestMeasurementsByChannel, readingByKey } from "./telemetry";
 import { TwinHud } from "./TwinHud";
-import "./models/model-controls.css";
+import { formatLength, useLengthUnit } from "../lib/units";
+import "./twin-hud.css";
 
 export interface Selection { type: EntityType; id: string }
 
@@ -93,7 +95,7 @@ function Selectable({ binding, selected, onSelect, title, detail, children }: { 
   const [hovered, setHovered] = useState(false);
   return <group position={binding.position} scale={binding.scale} onClick={(event) => { event.stopPropagation(); onSelect({ type: binding.entity_type, id: binding.entity_id }); }} onPointerOver={(event) => { event.stopPropagation(); setHovered(true); document.body.style.cursor = "pointer"; }} onPointerOut={() => { setHovered(false); document.body.style.cursor = "default"; }}>
     {children}
-    {(hovered || selected) && <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.45, 0]}><ringGeometry args={[0.65, 0.78, 40]} /><meshBasicMaterial color={selected ? "#8ddd7b" : "#9ee493"} transparent opacity={0.9} /></mesh>}
+    {(hovered || selected) && <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.45, 0]}><ringGeometry args={[0.65, 0.78, 40]} /><meshBasicMaterial color={selected ? "#f2d15b" : "#9be07f"} transparent opacity={0.9} /></mesh>}
     {hovered && <Html position={[0, 0.9, 0]} center className="gn-twin-tooltip"><strong>{title}</strong><span>{detail}</span></Html>}
   </group>;
 }
@@ -158,9 +160,9 @@ function ViewCamera({ view, farmPosition }: { view: string; farmPosition?: [numb
   return null;
 }
 
-export function DigitalTwin({ data, selection, onSelect, onAction }: { data: FarmData; selection?: Selection; onSelect: (selection: Selection) => void; onAction: (action: string) => void }) {
-  const [view, setView] = useState<"farm" | "tower" | "equipment" | "systems" | "designer">("farm");
-  const tentEditor = useTentDesigner(`grownerve:tent-layout:v1:${data.facilities[0]?.id ?? 'default'}`);
+export type TwinView = "farm" | "tower" | "equipment" | "systems" | "designer";
+
+export function DigitalTwin({ data, selection, onSelect, onAction, view, onViewChange: setView, tentEditor }: { data: FarmData; selection?: Selection; onSelect: (selection: Selection) => void; onAction: (action: string) => void; view: TwinView; onViewChange: (view: TwinView) => void; tentEditor: TentEditor }) {
   const [climate, setClimate] = useState<ClimateConfig>({ category: "fan", variant: "clip", running: true, output: 60 });
   const [growOptions, setGrowOptions] = useState({ led: "panel", pot: "nursery", diameter: 30, height: 30, fill: 80, output: 70 });
   const [towerLevels, setTowerLevels] = useState(6);
@@ -189,6 +191,7 @@ export function DigitalTwin({ data, selection, onSelect, onAction }: { data: Far
     return webgl;
   }, [quality.antialias]);
   const rendererLabel = renderer === "webgpu" ? "WebGPU · CC0 materials" : renderer === "webgl" ? "WebGL · CC0 materials" : "Starting renderer";
+  const lengthUnit = useLengthUnit();
   const help = quality.touchOptimized ? "Drag to orbit · Pinch to zoom · Tap an object to inspect" : "Drag to orbit · Scroll to zoom · Click an object to inspect";
   return <div className="gn-model-viewer">
     <div className="gn-model-switch" role="group" aria-label="3D view">
@@ -202,7 +205,7 @@ export function DigitalTwin({ data, selection, onSelect, onAction }: { data: Far
     {view === "equipment" && <div className="gn-model-switch" role="group" aria-label="Equipment options">
       <label>LED <select aria-label="LED style" value={growOptions.led} onChange={(event) => setGrowOptions({ ...growOptions, led: event.target.value })}><option value="panel">Panel</option><option value="bar">Linear bar</option><option value="multi_bar">Multi-bar</option></select></label>
       <label>Pot <select aria-label="Pot style" value={growOptions.pot} onChange={(event) => setGrowOptions({ ...growOptions, pot: event.target.value })}><option value="nursery">Nursery</option><option value="fabric">Fabric bag</option><option value="ceramic">Ceramic</option></select></label>
-      {([['diameter', 'Diameter', [20, 30, 40, 50]], ['height', 'Height', [20, 30, 40, 50]], ['fill', 'Soil fill', [0, 25, 50, 80, 100]], ['output', 'LED brightness', [0, 25, 50, 70, 100]]] as const).map(([key, label, values]) => <label key={key}>{label}<select aria-label={label} value={growOptions[key]} onChange={(event) => setGrowOptions({ ...growOptions, [key]: Number(event.target.value) })}>{values.map((value) => <option key={value} value={value}>{value}{key === 'diameter' || key === 'height' ? ' cm' : '%'}</option>)}</select></label>)}
+      {([['diameter', 'Diameter', [20, 30, 40, 50]], ['height', 'Height', [20, 30, 40, 50]], ['fill', 'Soil fill', [0, 25, 50, 80, 100]], ['output', 'LED brightness', [0, 25, 50, 70, 100]]] as const).map(([key, label, values]) => <label key={key}>{label}<select aria-label={label} value={growOptions[key]} onChange={(event) => setGrowOptions({ ...growOptions, [key]: Number(event.target.value) })}>{values.map((value) => <option key={value} value={value}>{key === 'diameter' || key === 'height' ? formatLength(value / 100, lengthUnit) : `${value}%`}</option>)}</select></label>)}
       <span>Model preview · visual brightness</span>
     </div>}
     {view === "systems" && <div className="gn-model-switch" role="group" aria-label="Climate equipment options">

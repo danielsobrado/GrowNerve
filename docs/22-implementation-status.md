@@ -37,6 +37,14 @@ This document is a ledger, not a product pitch. Every entry states what the code
 - forward/down PostgreSQL migrations and sqlc-generated access code
 - MQTT protocol-v1 telemetry, command, acknowledgement, health, and edge
   configuration handling, with per-device broker credentials supported
+- **Zigbee devices through Zigbee2MQTT** (`28-integrations.md`, ADR-038/039):
+  discovery, adoption into zones as ordinary devices and channels, telemetry in
+  canonical units, commands through the same safety/outbox path that become
+  `applied` only when the device reflects them, and availability-driven
+  liveness. Verified with unit tests, a real-broker test, and a Postgres-backed
+  server against the simulated bridge (`device-simulator -mode z2m`). The
+  Integrations screen covers status, discovery, adoption and pairing; Matter and
+  Home Assistant are not implemented
 - a deterministic MQTT device simulator that runs the same precedence engine as
   the firmware, and an **ESP32 reference firmware target** with persisted
   configuration, a watchdog, and fail-safe outputs

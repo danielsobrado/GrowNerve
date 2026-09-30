@@ -175,8 +175,10 @@ func TestRetainedConfigurationSurvivesServerLoss(t *testing.T) {
 		ProtocolVersion: deviceprotocol.Version, DeviceID: integrationDevice,
 		ConfigVersion: "pilot-v1", IssuedAt: time.Now().UTC(),
 		Config: deviceprotocol.EdgeSettings{
-			Photoperiod: &deviceprotocol.Photoperiod{OnHour: 6, OffHour: 22, ChannelID: lightChannel},
-			SafeOutputs: map[string]float64{lightChannel: 0},
+			// Wall-clock schedules need an explicit timezone on the controller.
+			TimezonePOSIX: "UTC0",
+			Photoperiod:   &deviceprotocol.Photoperiod{OnHour: 6, OffHour: 22, ChannelID: lightChannel},
+			SafeOutputs:   map[string]float64{lightChannel: 0},
 		},
 	}
 	payload, _ := json.Marshal(config)
@@ -234,8 +236,11 @@ func TestCommandAcknowledgementUpdatesTheDurableRecord(t *testing.T) {
 	url := brokerURL(t)
 	store := farm.NewMemoryStore()
 	commandID := "01990a20-6a00-7000-8000-0000000000b1"
-	state := fmt.Sprintf(`{"devices":[{"id":%q,"online":true}],"channels":[],"commands":[{"id":%q,"status":"published"}]}`,
-		integrationDevice, commandID)
+	// An acknowledgement only lands on a command whose target channel belongs to
+	// the acknowledging device and which has not expired.
+	state := fmt.Sprintf(`{"devices":[{"id":%q,"online":true}],"channels":[{"id":%q,"device_id":%q,"kind":"command"}],
+		"commands":[{"id":%q,"target_channel_id":%q,"status":"published","expires_at":%q}]}`,
+		integrationDevice, lightChannel, integrationDevice, commandID, lightChannel, time.Now().UTC().Add(time.Minute).Format(time.RFC3339Nano))
 	if _, err := store.Save(context.Background(), json.RawMessage(state), farm.AnyVersion); err != nil {
 		t.Fatal(err)
 	}

@@ -332,6 +332,8 @@ Browser mode stores bounded local measurement history in IndexedDB. Storage usag
 
 Browser-only state is not disposable demo state. A versioned `.grownerve.json` archive can export/import all domain data and optionally media.
 
+The archive also carries an optional `layouts` array: one tent or outdoor layout per facility (`facility_id` may also be `"default"`), including every object's position, size, rotation and equipment parameters. Layouts are validated with the same rules as a standalone `.grownerve-layout.json` file, and archives without `layouts` still import at schema version 1.
+
 Stable UUIDs are preserved so the archive can later be imported into the full server runtime.
 
 Import validation occurs before any destructive local write.

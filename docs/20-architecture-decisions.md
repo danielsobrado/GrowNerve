@@ -280,3 +280,40 @@ attachments with sniffing disabled.
 **Why:** a filename and a declared content type are both attacker-controlled.
 HTML and SVG can carry script, and this store's contents are served back to
 browsers, so the check has to be on the bytes.
+
+## ADR-038 — Third-party ecosystems are in-process adapters behind the command router
+
+**Decision:** Zigbee (through Zigbee2MQTT), Matter and Home Assistant are
+adapters inside the API process (`internal/platform/integrations/*`) behind a
+provider-neutral core (`internal/integration`). An integration device is an
+ordinary farm device carrying an `integration` binding (provider plus external
+identity); each adopted capability is an ordinary channel carrying an
+`integration_key`. A router takes the MQTT bridge's place behind the durable
+publisher and the outbox worker and sends each command to the adapter or the
+bridge by device.
+
+**Why:** everything that makes a command safe (authorization, safety
+validation, the persisted record, the outbox, expiry sweeping, "applied only on
+confirmation") already sits in front of the transport, so choosing the
+transport per device keeps all of it. The rejected alternative, a gateway
+process that re-publishes provider traffic as GrowNerve protocol messages,
+needs write access to every device's telemetry and acknowledgement topics
+(one compromised gateway could impersonate any ESP32) and a second copy of the
+device mapping that drifts from the farm document. A command counts as applied
+only when the provider reports the device state that the command asked for;
+publishing to Zigbee2MQTT proves nothing about the plug. Liveness comes from
+provider availability turned into server-receipt heartbeats, so if the adapter
+stops, the unchanged supervisor takes its devices offline.
+
+## ADR-039 — Integration outputs have no edge failsafe
+
+**Decision:** adopting any controllable capability requires an explicit
+`acknowledge_no_edge_failsafe`. Integration outputs cannot carry essential
+schedules or safety-critical outputs; those stay on an ESP32 controller.
+Integration commands are absolute targets, never toggles.
+
+**Why:** an ESP32 keeps its photoperiod, safe outputs and command expiry when
+the server is gone. A consumer smart plug keeps only its last state and its own
+power-on behaviour. That is acceptable for convenience loads and unacceptable
+for anything that must fail safe, and the operator has to see the difference
+when adopting. Absolute targets make an outbox redelivery harmless.

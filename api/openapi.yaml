@@ -269,8 +269,174 @@ paths:
               schema: { type: object, additionalProperties: true }
         "429": { $ref: "#/components/responses/Problem" }
         "500": { $ref: "#/components/responses/Problem" }
+  /api/v1/integrations:
+    get:
+      summary: List integration providers and their connection state
+      description: Every known provider is listed; disabled providers report state "disabled". Integration health never affects readiness.
+      operationId: listIntegrations
+      responses:
+        "200": { description: Provider statuses, content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/IntegrationStatus" } } } } }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /api/v1/integrations/{provider}/devices:
+    parameters:
+      - { in: path, name: provider, required: true, schema: { $ref: "#/components/schemas/IntegrationProvider" } }
+    get:
+      summary: List the devices a provider knows, adopted or not
+      description: Requires a manager. A provider inventory, particularly Home Assistant's, can describe a whole home.
+      operationId: listDiscoveredDevices
+      responses:
+        "200": { description: Discovered devices, content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/DiscoveredDevice" } } } } }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+  /api/v1/integrations/{provider}/devices/{externalId}/adopt:
+    parameters:
+      - { in: path, name: provider, required: true, schema: { $ref: "#/components/schemas/IntegrationProvider" } }
+      - in: path
+        name: externalId
+        required: true
+        description: Provider identity, such as a Zigbee IEEE address.
+        schema: { type: string, minLength: 1, maxLength: 256 }
+    post:
+      summary: Adopt a discovered device as a farm device with channels
+      description: >
+        Creates the device, one channel per chosen capability and their bindings in one committed write. Channel kind, value
+        type, unit and range come from the provider capability. Adopting any command capability requires
+        acknowledge_no_edge_failsafe because consumer devices have no controller-side failsafe (ADR-039).
+      operationId: adoptDiscoveredDevice
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/AdoptRequest" } } }
+      responses:
+        "201": { description: Device adopted, content: { application/json: { schema: { $ref: "#/components/schemas/AdoptResult" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "415": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /api/v1/integrations/{provider}/permit-join:
+    parameters:
+      - { in: path, name: provider, required: true, schema: { $ref: "#/components/schemas/IntegrationProvider" } }
+    post:
+      summary: Open the provider's network to new devices
+      description: Administrator only. Supported by zigbee2mqtt; seconds 0 closes the network.
+      operationId: permitJoin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [seconds]
+              properties:
+                seconds: { type: integer, minimum: 0, maximum: 254 }
+      responses:
+        "202":
+          description: Join window requested
+          content:
+            application/json:
+              schema: { type: object, required: [until], properties: { until: { type: string, format: date-time } } }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "501": { $ref: "#/components/responses/Problem" }
+        "502": { $ref: "#/components/responses/Problem" }
 components:
   schemas:
+    IntegrationProvider:
+      type: string
+      enum: [zigbee2mqtt, matter, home_assistant]
+    DeviceIntegration:
+      description: Present on a farm device that an integration manages.
+      type: object
+      required: [provider, external_id, adopted_at]
+      properties:
+        provider: { $ref: "#/components/schemas/IntegrationProvider" }
+        external_id: { type: string, minLength: 1, maxLength: 256 }
+        manufacturer: { type: string }
+        model: { type: string }
+        adopted_at: { type: string, format: date-time }
+    IntegrationStatus:
+      type: object
+      required: [provider, enabled, state, since, device_count, adopted_count, permit_join_supported]
+      properties:
+        provider: { $ref: "#/components/schemas/IntegrationProvider" }
+        enabled: { type: boolean }
+        state: { type: string, enum: [disabled, connecting, connected, degraded, error] }
+        detail: { type: string }
+        since: { type: string, format: date-time }
+        device_count: { type: integer, minimum: 0 }
+        adopted_count: { type: integer, minimum: 0 }
+        permit_join_supported: { type: boolean }
+        permit_join_until: { type: string, format: date-time }
+    IntegrationCapability:
+      type: object
+      required: [key, label, kind, value_type, unit, suggested_channel_key]
+      properties:
+        key: { type: string, description: "Becomes the channel's integration_key." }
+        label: { type: string }
+        kind: { type: string, enum: [measurement, state, command] }
+        value_type: { type: string, enum: [number, boolean] }
+        unit: { type: string }
+        dimension: { type: string }
+        minimum: { type: number }
+        maximum: { type: number }
+        suggested_channel_key: { type: string }
+        diagnostic: { type: boolean }
+        note: { type: string }
+    DiscoveredDevice:
+      type: object
+      required: [provider, external_id, name, suggested_type, available, capabilities]
+      properties:
+        provider: { $ref: "#/components/schemas/IntegrationProvider" }
+        external_id: { type: string }
+        name: { type: string }
+        manufacturer: { type: string }
+        model: { type: string }
+        firmware: { type: string }
+        power_source: { type: string, enum: [battery, mains] }
+        suggested_type: { type: string, enum: [controller, light, fan, air_pump, sensor] }
+        available: { type: boolean }
+        capabilities: { type: array, items: { $ref: "#/components/schemas/IntegrationCapability" } }
+        adopted_device_id: { type: string, format: uuid }
+    AdoptRequest:
+      type: object
+      additionalProperties: false
+      required: [zone_id, channels]
+      properties:
+        zone_id: { type: string }
+        name: { type: string }
+        type: { type: string, enum: [controller, light, fan, air_pump, sensor] }
+        acknowledge_no_edge_failsafe: { type: boolean }
+        channels:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/AdoptChannel" }
+    AdoptChannel:
+      type: object
+      additionalProperties: false
+      required: [capability_key]
+      properties:
+        capability_key: { type: string }
+        key: { type: string, description: "Farm channel key; defaults to the capability's suggestion. Unique per facility." }
+        name: { type: string }
+        entity_type: { type: string, enum: [facility, zone, reservoir, grow_cycle, plant_position, device, channel, inventory_item] }
+        entity_id: { type: string }
+        stale_after_seconds: { type: integer, minimum: 1 }
+        safe_minimum: { type: number }
+        safe_maximum: { type: number }
+    AdoptResult:
+      type: object
+      required: [device, channels]
+      properties:
+        device: { type: object, additionalProperties: true }
+        channels: { type: array, items: { type: object, additionalProperties: true } }
     Health:
       type: object
       required: [status]

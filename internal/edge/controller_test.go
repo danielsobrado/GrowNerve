@@ -138,18 +138,41 @@ func TestExpiredCommandIsRejected(t *testing.T) {
 }
 
 func TestControllerTimeoutOutranksAGenerousServerExpiry(t *testing.T) {
-	controller := configuredController(t)
+	// The protocol caps a command at five minutes; a controller configured with
+	// a shorter limit must still end the override at its own limit.
+	controller := NewController(testDevice)
+	config := pilotConfig()
+	config.Config.CommandTimeoutSeconds = 60
+	if err := controller.ApplyConfig(config); err != nil {
+		t.Fatal(err)
+	}
 	now := at(3, 0)
 	command := deviceprotocol.Command{
 		ProtocolVersion: deviceprotocol.Version, CommandID: "01990a20-6a00-7000-8000-000000000052",
 		TargetChannelID: fanChannel, Type: "set_percent", Value: float64(90),
-		IssuedAt: now, ExpiresAt: now.Add(24 * time.Hour),
+		IssuedAt: now, ExpiresAt: now.Add(deviceprotocol.MaximumCommandLifetime),
 	}
 	if err := controller.ApplyCommand(command, now); err != nil {
 		t.Fatal(err)
 	}
-	if resolution := controller.Resolve(fanChannel, now.Add(10*time.Minute)); resolution.Source == SourceOverride {
+	if resolution := controller.Resolve(fanChannel, now.Add(30*time.Second)); resolution.Source != SourceOverride {
+		t.Fatalf("the override ended before the controller's limit: %+v", resolution)
+	}
+	if resolution := controller.Resolve(fanChannel, now.Add(2*time.Minute)); resolution.Source == SourceOverride {
 		t.Fatalf("a server-supplied expiry overrode the controller's own limit: %+v", resolution)
+	}
+}
+
+func TestControllerRefusesCommandsBeyondTheProtocolLifetime(t *testing.T) {
+	controller := configuredController(t)
+	now := at(3, 0)
+	command := deviceprotocol.Command{
+		ProtocolVersion: deviceprotocol.Version, CommandID: "01990a20-6a00-7000-8000-000000000055",
+		TargetChannelID: fanChannel, Type: "set_percent", Value: float64(90),
+		IssuedAt: now, ExpiresAt: now.Add(24 * time.Hour),
+	}
+	if err := controller.ApplyCommand(command, now); err == nil {
+		t.Fatal("a command with a 24-hour lifetime was accepted")
 	}
 }
 
@@ -183,7 +206,7 @@ func TestHardwareInterlockOutranksEverything(t *testing.T) {
 	command := deviceprotocol.Command{
 		ProtocolVersion: deviceprotocol.Version, CommandID: "01990a20-6a00-7000-8000-000000000054",
 		TargetChannelID: lightChannel, Type: "set_percent", Value: float64(100),
-		IssuedAt: now, ExpiresAt: now.Add(time.Hour),
+		IssuedAt: now, ExpiresAt: now.Add(deviceprotocol.MaximumCommandLifetime),
 	}
 	if err := controller.ApplyCommand(command, now); err != nil {
 		t.Fatal(err)

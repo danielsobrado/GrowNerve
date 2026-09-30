@@ -126,7 +126,7 @@ Potential features after core operations are stable:
 - energy, water, and nutrient efficiency
 - recommendation engine
 - farmOS import/export adapter
-- optional Home Assistant integration
+- optional Home Assistant integration (brought forward with Zigbee and Matter; see `28-integrations.md`)
 
 ## Explicit scale assumptions
 

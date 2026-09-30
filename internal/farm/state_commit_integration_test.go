@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"testing"
 
 	"github.com/jdanielsobrado/grownerve/internal/farm"
@@ -30,6 +29,21 @@ func stateDocument(name string, measurementChannel string) json.RawMessage {
 		"channels":[{"id":"%s","entity_type":"facility","entity_id":"%s","key":"air.temperature","name":"Air temperature","kind":"measurement","value_type":"number","unit":"degC","stale_after_seconds":60}],
 		"measurements":%s
 	}`, commitFacilityID, name, commitDeviceID, commitChannelID, commitFacilityID, measurements))
+}
+
+// storedFacilityName decodes the document rather than matching its text:
+// PostgreSQL returns JSONB re-serialised, with its own spacing and key order.
+func storedFacilityName(t *testing.T, state json.RawMessage) string {
+	t.Helper()
+	var document struct {
+		Facilities []struct {
+			Name string `json:"name"`
+		} `json:"facilities"`
+	}
+	if err := json.Unmarshal(state, &document); err != nil || len(document.Facilities) != 1 {
+		t.Fatalf("stored state is not the expected document (%v): %s", err, state)
+	}
+	return document.Facilities[0].Name
 }
 
 func TestPostgresStateCommitterRejectsStaleWriteWithoutProjectionSideEffects(t *testing.T) {
@@ -63,7 +77,7 @@ func TestPostgresStateCommitterRejectsStaleWriteWithoutProjectionSideEffects(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	if storedVersion != winnerVersion || !strings.Contains(string(state), `"name":"Winner"`) || strings.Contains(string(state), `"name":"Loser"`) {
+	if storedVersion != winnerVersion || storedFacilityName(t, state) != "Winner" {
 		t.Fatalf("stale commit changed stored state: version=%d state=%s", storedVersion, state)
 	}
 
@@ -104,7 +118,7 @@ func TestPostgresStateCommitterRollsBackStateAndRegistryWhenTelemetryImportFails
 	if err != nil {
 		t.Fatal(err)
 	}
-	if storedVersion != version || !strings.Contains(string(state), `"name":"Stable"`) || strings.Contains(string(state), `Must Roll Back`) {
+	if storedVersion != version || storedFacilityName(t, state) != "Stable" {
 		t.Fatalf("failed telemetry import changed state: version=%d state=%s", storedVersion, state)
 	}
 

@@ -3,7 +3,7 @@ package farm
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"log/slog"
 	"math"
 	"strings"
@@ -32,7 +32,7 @@ func (publisher *DurablePublisher) PublishCommand(ctx context.Context, deviceID 
 	if encodeErr != nil {
 		return err
 	}
-	topic := fmt.Sprintf("grownerve/v1/devices/%s/commands", deviceID)
+	topic := CommandTopic(deviceID)
 	if _, queueErr := publisher.queue.Enqueue(ctx, topic, command.CommandID, payload); queueErr != nil {
 		publisher.logger.Error("command_enqueue_failed", "error", queueErr, "command", command.CommandID)
 		return err
@@ -62,12 +62,24 @@ func NewOutboxWorker(queue outbox.Store, transport RawPublisher, logger *slog.Lo
 	}
 }
 
+// ErrTransportUnavailable reports that a whole command transport is down (the
+// MQTT broker, not one device behind it). Drain stops at such a failure so an
+// outage does not burn an attempt on every queued message.
+var ErrTransportUnavailable = errors.New("command transport is unavailable")
+
 func (worker *OutboxWorker) Drain(ctx context.Context) error {
 	pending, err := worker.queue.Pending(ctx, worker.batchSize)
 	if err != nil {
 		return err
 	}
+	// A failure scoped to one destination (an unreachable Zigbee plug) must not
+	// hold back commands for every other device, so later messages for the
+	// same topic are skipped for this pass and the rest of the batch continues.
+	blocked := map[string]bool{}
 	for _, message := range pending {
+		if blocked[message.Topic] {
+			continue
+		}
 		if command, discard, reason := queuedCommandDisposition(message, worker.now()); discard {
 			// MarkPublished is the store's terminal-success state. For commands it
 			// also means terminally discarded: replaying corrupted or expired
@@ -85,7 +97,11 @@ func (worker *OutboxWorker) Drain(ctx context.Context) error {
 			if message.Attempts+1 >= outbox.MaximumAttempts {
 				worker.logger.Error("outbox_message_parked", "message", message.ID, "topic", message.Topic, "attempts", message.Attempts+1)
 			}
-			return nil
+			if errors.Is(err, ErrTransportUnavailable) {
+				return nil
+			}
+			blocked[message.Topic] = true
+			continue
 		}
 		if err := worker.queue.MarkPublished(ctx, message.ID); err != nil {
 			return err

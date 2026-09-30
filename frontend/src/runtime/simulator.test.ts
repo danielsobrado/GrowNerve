@@ -36,3 +36,14 @@ describe("browser simulator", () => {
     expect(setDeviceOnline(offline, fan.id, true, "2026-09-01T12:00:00Z").devices.find((entry) => entry.id === fan.id)?.last_heartbeat).toBe("2026-09-01T12:00:00Z");
   });
 });
+
+describe("browser simulator and integration devices", () => {
+  it("never invents readings for integration-managed devices", () => {
+    const data = pilotData();
+    const sensor = data.devices.find((device) => data.channels.some((channel) => channel.device_id === device.id && channel.kind === "measurement"))!;
+    sensor.integration = { provider: "zigbee2mqtt", external_id: "0x1", adopted_at: "2026-09-30T00:00:00Z" };
+    const next = tickSimulator(data, "2026-09-01T12:00:00Z", 44);
+    const sensorChannels = new Set(data.channels.filter((channel) => channel.device_id === sensor.id).map((channel) => channel.id));
+    expect(next.measurements.slice(data.measurements.length).some((measurement) => sensorChannels.has(measurement.channel_id))).toBe(false);
+  });
+});

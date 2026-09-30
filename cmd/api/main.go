@@ -15,12 +15,14 @@ import (
 	"time"
 
 	"github.com/jdanielsobrado/grownerve/internal/farm"
+	"github.com/jdanielsobrado/grownerve/internal/integration"
 	"github.com/jdanielsobrado/grownerve/internal/media"
 	"github.com/jdanielsobrado/grownerve/internal/platform/audit"
 	"github.com/jdanielsobrado/grownerve/internal/platform/auth"
 	"github.com/jdanielsobrado/grownerve/internal/platform/config"
 	"github.com/jdanielsobrado/grownerve/internal/platform/database"
 	"github.com/jdanielsobrado/grownerve/internal/platform/httpx"
+	"github.com/jdanielsobrado/grownerve/internal/platform/integrations/zigbee2mqtt"
 	platformmiddleware "github.com/jdanielsobrado/grownerve/internal/platform/middleware"
 	mqttbridge "github.com/jdanielsobrado/grownerve/internal/platform/mqtt"
 	"github.com/jdanielsobrado/grownerve/internal/platform/outbox"
@@ -84,11 +86,21 @@ func run() error {
 		mqttbridge.WithCredentials(os.Getenv(cfg.MQTT.UsernameEnv), os.Getenv(cfg.MQTT.PasswordEnv)))
 	bridge.Start(runtimeContext)
 
-	publisher := farm.NewDurablePublisher(bridge, queue, logger)
+	integrations := integration.NewManager(integration.Dependencies{
+		Store: stateStore, Committer: stateCommitter, Telemetry: samples, Notifier: events,
+		Audit: recorder, Logger: logger, LivenessInterval: cfg.Integrations.LivenessInterval,
+	}, integrationAdapters(cfg, logger)...)
+	integrations.Start(runtimeContext)
+	// The router carries commands for integration-managed devices to their
+	// adapter and everything else to the MQTT bridge, behind the same durable
+	// publisher and outbox (ADR-038).
+	commandTransport := integration.NewRouter(bridge, integrations)
+
+	publisher := farm.NewDurablePublisher(commandTransport, queue, logger)
 	configPublisher := runtime.NewValidatingConfigPublisher(bridge)
 	supervisor := runtime.New(stateStore, samples, logger, runtimeConfig(cfg),
 		runtime.WithNotifier(events), runtime.WithConfigPublisher(configPublisher),
-		runtime.WithAuditRecorder(recorder), runtime.WithOutbox(farm.NewOutboxWorker(queue, bridge, logger)))
+		runtime.WithAuditRecorder(recorder), runtime.WithOutbox(farm.NewOutboxWorker(queue, commandTransport, logger)))
 	supervisor.Start(runtimeContext)
 
 	health := httpx.NewHealthHandler(func() error {
@@ -111,10 +123,13 @@ func run() error {
 		_ = json.NewEncoder(writer).Encode(map[string]string{"version": version})
 	})
 	mux.HandleFunc("GET /api/v1/stream", events.Stream)
+	integrationAPI := integration.NewHandler(integrations, farm.RoleAuthorizer{}, logger)
+	mux.Handle("/api/v1/integrations", integrationAPI)
+	mux.Handle("/api/v1/integrations/", integrationAPI)
 	api := farm.RequireCommandIdempotency(farm.NewHandler(stateStore,
 		farm.WithStateCommitter(stateCommitter),
 		farm.WithCommandPublisher(publisher), farm.WithTelemetry(samples), farm.WithMediaStore(mediaStore),
-		farm.WithNotifier(events), farm.WithAuthorizer(farm.RoleAuthorizer{}),
+		farm.WithNotifier(integration.FanOut(events, integrations)), farm.WithAuthorizer(farm.RoleAuthorizer{}),
 		farm.WithAuditRecorder(recorder), farm.WithLogger(logger)))
 	mux.Handle("/api/v1/", api)
 
@@ -163,6 +178,26 @@ func validateRuntimeSecrets(cfg config.Config) error {
 		return errors.New("production MQTT credential environment variables must contain non-empty values")
 	}
 	return nil
+}
+
+// integrationAdapters builds the enabled third-party integrations. Their
+// connection state never affects readiness: a missing Zigbee bridge must not
+// take down the farm's own controllers.
+func integrationAdapters(cfg config.Config, logger *slog.Logger) []integration.Adapter {
+	var adapters []integration.Adapter
+	if zigbee := cfg.Integrations.Zigbee2MQTT; zigbee.Enabled {
+		broker, username, password := zigbee.Broker, os.Getenv(zigbee.UsernameEnv), os.Getenv(zigbee.PasswordEnv)
+		if broker == "" {
+			broker, username, password = cfg.MQTT.Broker, os.Getenv(cfg.MQTT.UsernameEnv), os.Getenv(cfg.MQTT.PasswordEnv)
+		}
+		adapters = append(adapters, zigbee2mqtt.New(zigbee2mqtt.Config{
+			Broker: broker, ClientID: zigbee.ClientID, Username: username, Password: password,
+			BaseTopic: zigbee.BaseTopic, AvailabilityFallback: zigbee.AvailabilityFallback,
+			Logger: logger.With("integration", "zigbee2mqtt"),
+		}))
+		logger.Info("integration_enabled", "provider", "zigbee2mqtt", "broker", broker, "base_topic", zigbee.BaseTopic)
+	}
+	return adapters
 }
 
 func runtimeConfig(cfg config.Config) runtime.Config {

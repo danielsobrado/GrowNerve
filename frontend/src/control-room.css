@@ -57,14 +57,34 @@ textarea:focus-visible {
 .gn-sidebar {
   width: 238px;
   flex-basis: 238px;
-  background: linear-gradient(180deg, #0d130f 0%, #0a0f0c 100%);
+  background:
+    linear-gradient(180deg, rgba(10, 15, 12, .78) 0%, rgba(10, 15, 12, .5) 32%, rgba(10, 15, 12, .42) 70%, rgba(10, 15, 12, .72) 100%),
+    url("./assets/backgrounds/hydroponic-sidebar.webp") left center / cover no-repeat,
+    #0a0f0c;
   border-right-color: #1b251f;
   box-shadow: 18px 0 50px -46px #000;
 }
 
 .gn-brand {
-  height: 72px;
-  border-bottom-color: #1a241e;
+  position: relative;
+  height: 60px;
+  border-bottom-color: #18211b;
+  background:
+    radial-gradient(70% 120% at 12% 50%, rgba(141, 221, 123, .14), transparent 70%),
+    radial-gradient(40% 90% at 100% 0%, rgba(242, 209, 91, .06), transparent 70%),
+    rgba(10, 15, 12, .55);
+}
+
+/* Continues the breadcrumb bar's hairline so the two headers read as one strip. */
+.gn-brand::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 1px;
+  pointer-events: none;
+  background: linear-gradient(90deg, rgba(242, 209, 91, .35), rgba(141, 221, 123, .45));
 }
 
 .gn-brand strong {
@@ -73,7 +93,6 @@ textarea:focus-visible {
 }
 
 .gn-brand span,
-.gn-operator span,
 .gn-sidebar nav section > p {
   color: #66746a;
 }
@@ -86,25 +105,10 @@ textarea:focus-visible {
   box-shadow: 0 0 0 1px rgba(160, 236, 137, .2), 0 8px 24px -14px rgba(116, 219, 100, .8);
 }
 
-.gn-runtime,
-.gn-operator {
-  border-bottom-color: #1a241e;
-}
-
-.gn-runtime {
-  padding-top: 10px;
-  padding-bottom: 10px;
-}
-
-.gn-avatar,
 .gn-top-avatar {
   color: #a8e99b;
   background: #1b2a20;
   border: 1px solid #2b3c31;
-}
-
-.gn-operator strong {
-  color: #dce6df;
 }
 
 .gn-sidebar nav {
@@ -191,10 +195,26 @@ textarea:focus-visible {
   height: 60px;
   flex-basis: 60px;
   color: var(--ink);
-  background: rgba(12, 17, 14, .94);
-  border-bottom-color: #1d2721;
+  position: relative;
+  background:
+    radial-gradient(38% 160% at 0% 0%, rgba(126, 201, 104, .14), transparent 70%),
+    radial-gradient(24% 140% at 100% 0%, rgba(242, 209, 91, .06), transparent 70%),
+    rgba(12, 17, 14, .94);
+  border-bottom-color: #18211b;
   box-shadow: 0 10px 30px -28px #000;
   backdrop-filter: blur(18px);
+}
+
+/* Hairline glow along the breadcrumb bar: green from the sidebar, fading to a hint of yellow. */
+.gn-topbar::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 1px;
+  pointer-events: none;
+  background: linear-gradient(90deg, rgba(141, 221, 123, .45), rgba(141, 221, 123, .12) 35%, rgba(242, 209, 91, .1) 75%, transparent);
 }
 
 .gn-crumb {
@@ -562,92 +582,6 @@ kbd {
   box-shadow: 0 26px 70px -48px #000, 0 0 0 1px rgba(109, 193, 99, .025) inset;
 }
 
-.gn-twin-wrap {
-  background:
-    radial-gradient(circle at 50% 38%, rgba(52, 93, 57, .18), transparent 38%),
-    #080d0a;
-}
-
-.gn-twin-tooltip {
-  min-width: 138px;
-  padding: 9px 11px;
-  color: #f0f6f1;
-  background: rgba(10, 16, 12, .9);
-  border-color: rgba(146, 215, 133, .22);
-  border-radius: 8px;
-  box-shadow: 0 16px 30px -20px #000;
-  backdrop-filter: blur(14px);
-}
-
-.gn-twin-tooltip strong {
-  font-size: 9.5px;
-  font-weight: 650;
-}
-
-.gn-twin-tooltip span {
-  margin-top: 4px;
-  color: #9bad9f;
-  font-size: 8px;
-  text-transform: none;
-}
-
-.gn-renderer-badge {
-  top: 14px;
-  left: 14px;
-  padding: 6px 9px;
-  color: #9aab9e;
-  background: rgba(8, 13, 10, .78);
-  border: 1px solid rgba(123, 200, 111, .12);
-  border-radius: 999px;
-  backdrop-filter: blur(12px);
-}
-
-.gn-renderer-badge span {
-  background: #79d06e;
-  box-shadow: 0 0 9px rgba(121, 208, 110, .55);
-}
-
-.gn-radial {
-  bottom: 18px;
-  padding: 7px;
-  gap: 6px;
-  background: rgba(8, 13, 10, .86);
-  border-color: rgba(151, 216, 138, .15);
-  border-radius: 14px;
-  box-shadow: 0 18px 38px -22px #000;
-  backdrop-filter: blur(18px);
-}
-
-.gn-radial button {
-  width: 68px;
-  min-height: 48px;
-  padding: 6px 5px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  color: #b8c6bc;
-  background: rgba(255, 255, 255, .035);
-  border: 1px solid transparent;
-  border-radius: 9px;
-  font-size: 7.5px;
-  line-height: 1.1;
-  transition: background .13s ease, color .13s ease, border-color .13s ease, transform .13s ease;
-}
-
-.gn-radial button svg {
-  width: 15px;
-  height: 15px;
-}
-
-.gn-radial button:hover {
-  color: #071008;
-  background: #90dc7d;
-  border-color: #a1e490;
-  transform: translateY(-1px);
-}
-
 .gn-inspector {
   background: linear-gradient(180deg, #101712, #0d130f);
   border-color: #263229;
@@ -793,9 +727,5 @@ kbd {
 
   .gn-twin-layout {
     grid-template-columns: 1fr;
-  }
-
-  .gn-radial button {
-    flex: 0 0 64px;
   }
 }

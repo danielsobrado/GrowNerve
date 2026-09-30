@@ -8,18 +8,25 @@ import { BrowserFarmRepository, type FarmRepository } from "./runtime/browserRep
 import { createArchive, serializeArchive } from "./runtime/archive";
 import { pilotData } from "./runtime/pilotData";
 import { applySimulatedCommand, setDeviceOnline, tickSimulator } from "./runtime/simulator";
+import type { IntegrationClient } from "./runtime/integrations";
 import type { Selection } from "./twin/DigitalTwin";
+import { clearStoredLayouts, DEFAULT_LAYOUT_OWNER, readStoredLayouts, writeStoredLayouts } from "./twin/layoutStore";
 import {
   AlertsScreen, AutomationScreen, DevicesScreen, FarmScreen, GrowCyclesScreen, HistoryScreen,
   InventoryScreen, OverviewScreen, SettingsScreen, TwinScreen, type ScreenActions,
 } from "./screens/screens";
+import { IntegrationsScreen } from "./screens/IntegrationsScreen";
 
 const routeFromHash = (): RouteKey => {
   const candidate = location.hash.replace(/^#\/?/, "") as RouteKey;
-  return ["overview", "farm", "grows", "twin", "alerts", "history", "inventory", "automation", "devices", "settings"].includes(candidate) ? candidate : "overview";
+  return ["overview", "farm", "grows", "twin", "alerts", "history", "inventory", "automation", "devices", "integrations", "settings"].includes(candidate) ? candidate : "overview";
 };
 
-type ApplicationRepository = FarmRepository & Partial<Pick<BrowserFarmRepository, "importReplace">> & { issueCommand?: (intent: { targetChannelId: string; value: number | boolean; reason: string }) => Promise<unknown> };
+type ApplicationRepository = FarmRepository & Partial<Pick<BrowserFarmRepository, "importReplace">> & Partial<IntegrationClient> & { issueCommand?: (intent: { targetChannelId: string; value: number | boolean; reason: string }) => Promise<unknown> };
+
+/** The integration client, when the runtime offers one (only the server runtime does). */
+const integrationClientOf = (repository: ApplicationRepository): IntegrationClient | undefined =>
+  repository.listIntegrations && repository.listDiscovered && repository.adoptDevice && repository.permitJoin ? repository as IntegrationClient : undefined;
 
 export function App({ repository, runtimeMode = "browser" }: { repository: ApplicationRepository; runtimeMode?: RuntimeMode }) {
   const [data, setData] = useState<FarmData>();
@@ -42,7 +49,7 @@ export function App({ repository, runtimeMode = "browser" }: { repository: Appli
     void persist(tickSimulator(pilotData(), new Date().toISOString(), 1));
     setRoute("overview");
   }, [persist, runtimeMode, setRoute]);
-  const reset = useCallback(() => { void repository.clear().then(() => setData(undefined)); setSelection(undefined); }, [repository]);
+  const reset = useCallback(() => { clearStoredLayouts(); void repository.clear().then(() => setData(undefined)); setSelection(undefined); }, [repository]);
 
   const actions = useMemo<ScreenActions>(() => ({
     refreshSimulator: () => { if (runtimeMode === "browser" && data) void persist(tickSimulator(data)); },
@@ -61,8 +68,8 @@ export function App({ repository, runtimeMode = "browser" }: { repository: Appli
     addInventoryAdjustment: (itemId, quantity, reason) => { if (!data) return; const next = structuredClone(data), item = next.inventory_items.find((entry) => entry.id === itemId); if (!item) return; next.inventory_adjustments.push({ id: crypto.randomUUID(), item_id: itemId, occurred_at: new Date().toISOString(), quantity, unit: item.unit, reason }); void persist(next); },
     toggleRule: (ruleId) => { if (!data) return; const next = structuredClone(data), rule = next.automation_rules.find((entry) => entry.id === ruleId); if (rule) rule.enabled = !rule.enabled; void persist(next); },
     setDeviceOnline: (deviceId, online) => { if (runtimeMode === "browser" && data) void persist(setDeviceOnline(data, deviceId, online)); },
-    exportArchive: (includeMedia) => { if (!data) return; const archive = createArchive(data, { media: includeMedia ? [] : [] }), blob = new Blob([serializeArchive(archive)], { type: "application/json" }), url = URL.createObjectURL(blob), anchor = document.createElement("a"); anchor.href = url; anchor.download = `grownerve-${new Date().toISOString().slice(0, 10)}.grownerve.json`; anchor.click(); URL.revokeObjectURL(url); },
-    importArchive: async (archive) => { if (repository.importReplace) await repository.importReplace(archive); else throw new Error("Import is unavailable in this runtime"); setData(await repository.load()); setRoute("overview"); },
+    exportArchive: (includeMedia) => { if (!data) return; const facilities = new Set([DEFAULT_LAYOUT_OWNER, ...data.facilities.map((facility) => facility.id)]), archive = createArchive(data, { media: includeMedia ? [] : [], layouts: readStoredLayouts().filter((entry) => facilities.has(entry.facility_id)) }), blob = new Blob([serializeArchive(archive)], { type: "application/json" }), url = URL.createObjectURL(blob), anchor = document.createElement("a"); anchor.href = url; anchor.download = `grownerve-${new Date().toISOString().slice(0, 10)}.grownerve.json`; anchor.click(); URL.revokeObjectURL(url); },
+    importArchive: async (archive) => { if (!repository.importReplace) throw new Error("Import is unavailable in this runtime"); writeStoredLayouts((await repository.importReplace(archive)).layouts ?? []); setData(await repository.load()); setRoute("overview"); },
     reset,
     loadPilot,
   }), [data, persist, repository, reset, selection, setRoute, loadPilot, runtimeMode]);
@@ -93,6 +100,7 @@ export function App({ repository, runtimeMode = "browser" }: { repository: Appli
       case "inventory": return <InventoryScreen data={data} actions={actions} />;
       case "automation": return <AutomationScreen data={data} actions={actions} runtimeMode={runtimeMode} />;
       case "devices": return <DevicesScreen data={data} actions={actions} runtimeMode={runtimeMode} />;
+      case "integrations": return <IntegrationsScreen data={data} runtimeMode={runtimeMode} client={integrationClientOf(repository)} onOpenDevices={() => setRoute("devices")} />;
       case "settings": return <SettingsScreen data={data} runtimeMode={runtimeMode} actions={actions} />;
       default: return <OverviewScreen data={data} actions={actions} runtimeMode={runtimeMode} />;
     }
@@ -103,7 +111,7 @@ export function App({ repository, runtimeMode = "browser" }: { repository: Appli
 function FirstRun({ repository, onPilot, onCreated, runtimeMode }: { repository: ApplicationRepository; onPilot: () => void; onCreated: (data: FarmData) => void; runtimeMode: RuntimeMode }) {
   const [error, setError] = useState<string>();
   const createFarm = async () => { const data = emptyFarmData(); data.facilities.push({ id: crypto.randomUUID(), name: "My Indoor Farm", timezone: Intl.DateTimeFormat().resolvedOptions().timeZone }); await repository.replace(data); onCreated(data); };
-  const importArchive = async (file?: File) => { if (!file || !repository.importReplace) return; try { setError(undefined); await repository.importReplace(JSON.parse(await file.text())); const data = await repository.load(); if (data) onCreated(data); } catch (cause) { setError(cause instanceof Error ? cause.message : "Import failed"); } };
+  const importArchive = async (file?: File) => { if (!file || !repository.importReplace) return; try { setError(undefined); writeStoredLayouts((await repository.importReplace(JSON.parse(await file.text()))).layouts ?? []); const data = await repository.load(); if (data) onCreated(data); } catch (cause) { setError(cause instanceof Error ? cause.message : "Import failed"); } };
   return <main className="gn-welcome"><div className="gn-welcome-brand"><div><Leaf /></div><span>GrowNerve</span></div><section><p className="gn-eyebrow">Local-first farm intelligence</p><h1>Welcome to GrowNerve</h1><p>{runtimeMode === "browser" ? "Start a private farm in this browser, explore the deterministic pilot tent, or restore a complete portable archive." : "Create the first server-backed farm configuration."}</p><div className="gn-welcome-actions"><button aria-label="Create farm" className="gn-welcome-card" onClick={createFarm}><span><Plus /></span><div><strong>Create farm</strong><p>{runtimeMode === "browser" ? "Start empty with IndexedDB persistence." : "Create the server-backed farm state."}</p></div></button>{runtimeMode === "browser" && <button aria-label="Load pilot example" className="gn-welcome-card featured" onClick={onPilot}><span><Leaf /></span><div><strong>Load pilot example</strong><p>Explore the 3 × 3 ft DWC reference grow.</p></div></button>}{runtimeMode === "browser" && <label className="gn-welcome-card"><span><FileUp /></span><div><strong>Import .grownerve.json</strong><p>Validate and restore a portable backup.</p></div><input type="file" accept=".json,.grownerve.json" onChange={(event) => void importArchive(event.target.files?.[0])} /></label>}</div>{error && <p className="gn-error">{error}</p>}{runtimeMode === "browser" && <p className="gn-welcome-note"><Download size={14} /> Your data stays local and remains exportable.</p>}</section></main>;
 }
 

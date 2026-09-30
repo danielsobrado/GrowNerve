@@ -6,6 +6,8 @@ package runtime
 
 import (
 	"encoding/json"
+	"reflect"
+	"strings"
 	"time"
 )
 
@@ -39,6 +41,57 @@ type deviceRecord struct {
 	DesiredConfig        json.RawMessage `json:"desired_config,omitempty"`
 	DesiredConfigVersion string          `json:"desired_config_version,omitempty"`
 	LastConfigResult     map[string]any  `json:"last_config_result,omitempty"`
+
+	// unmodelled carries every field this projection does not name (for
+	// example an integration binding) so writing devices back cannot drop it.
+	unmodelled map[string]json.RawMessage
+}
+
+// deviceFields is the set of JSON names deviceRecord models itself.
+var deviceFields = func() map[string]bool {
+	fields := map[string]bool{}
+	recordType := reflect.TypeOf(deviceRecord{})
+	for index := range recordType.NumField() {
+		name, _, _ := strings.Cut(recordType.Field(index).Tag.Get("json"), ",")
+		if name != "" && name != "-" {
+			fields[name] = true
+		}
+	}
+	return fields
+}()
+
+func (record *deviceRecord) UnmarshalJSON(data []byte) error {
+	type plain deviceRecord
+	if err := json.Unmarshal(data, (*plain)(record)); err != nil {
+		return err
+	}
+	var all map[string]json.RawMessage
+	if err := json.Unmarshal(data, &all); err != nil {
+		return err
+	}
+	record.unmodelled = map[string]json.RawMessage{}
+	for key, value := range all {
+		if !deviceFields[key] {
+			record.unmodelled[key] = value
+		}
+	}
+	return nil
+}
+
+func (record deviceRecord) MarshalJSON() ([]byte, error) {
+	type plain deviceRecord
+	modelled, err := json.Marshal(plain(record))
+	if err != nil || len(record.unmodelled) == 0 {
+		return modelled, err
+	}
+	var merged map[string]json.RawMessage
+	if err := json.Unmarshal(modelled, &merged); err != nil {
+		return nil, err
+	}
+	for key, value := range record.unmodelled {
+		merged[key] = value
+	}
+	return json.Marshal(merged)
 }
 
 type channelRecord struct {

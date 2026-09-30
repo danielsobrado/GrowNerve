@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"testing"
@@ -26,7 +27,7 @@ type flakyBroker struct {
 
 func (broker *flakyBroker) PublishCommand(_ context.Context, _ string, command deviceprotocol.Command) error {
 	if !broker.available {
-		return errors.New("MQTT broker is unavailable")
+		return fmt.Errorf("MQTT broker is unavailable: %w", ErrTransportUnavailable)
 	}
 	broker.published = append(broker.published, command.CommandID)
 	return nil
@@ -34,7 +35,7 @@ func (broker *flakyBroker) PublishCommand(_ context.Context, _ string, command d
 
 func (broker *flakyBroker) PublishRaw(_ context.Context, _ string, payload []byte) error {
 	if !broker.available {
-		return errors.New("MQTT broker is unavailable")
+		return fmt.Errorf("MQTT broker is unavailable: %w", ErrTransportUnavailable)
 	}
 	var command deviceprotocol.Command
 	if err := json.Unmarshal(payload, &command); err != nil {
@@ -157,7 +158,7 @@ func TestDrainStopsAtTheFirstFailureRatherThanBurningEveryAttempt(t *testing.T) 
 	queue := outbox.NewMemoryStore()
 	ctx := context.Background()
 	for index := 0; index < 3; index++ {
-		if _, err := queue.Enqueue(ctx, "topic", "key", json.RawMessage(`{}`)); err != nil {
+		if _, err := queue.Enqueue(ctx, "topic", fmt.Sprint("key-", index), json.RawMessage(`{}`)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -170,5 +171,50 @@ func TestDrainStopsAtTheFirstFailureRatherThanBurningEveryAttempt(t *testing.T) 
 	}
 	if pending[0].Attempts != 1 || pending[1].Attempts != 0 {
 		t.Fatalf("attempts = %d, %d; the outage burned attempts on the whole batch", pending[0].Attempts, pending[1].Attempts)
+	}
+}
+
+// deviceScopedTransport fails every message for one topic the way an
+// integration adapter fails for a single unreachable device.
+type deviceScopedTransport struct {
+	failing   string
+	attempted []string
+}
+
+func (transport *deviceScopedTransport) PublishRaw(_ context.Context, topic string, _ []byte) error {
+	transport.attempted = append(transport.attempted, topic)
+	if topic == transport.failing {
+		return errors.New("device unreachable")
+	}
+	return nil
+}
+
+func TestDrainIsolatesFailuresPerDevice(t *testing.T) {
+	queue := outbox.NewMemoryStore()
+	ctx := context.Background()
+	now := time.Now().UTC()
+	unreachable, healthy := CommandTopic("01990a20-6a00-7000-8000-0000000004aa"), CommandTopic(queuedDeviceID)
+	enqueue := func(topic, id string) {
+		command := validQueuedCommand(now)
+		command.CommandID = id
+		payload, _ := json.Marshal(command)
+		if _, err := queue.Enqueue(ctx, topic, id, payload); err != nil {
+			t.Fatal(err)
+		}
+	}
+	enqueue(unreachable, "01990a20-6a00-7000-8000-000000000501")
+	enqueue(unreachable, "01990a20-6a00-7000-8000-000000000502")
+	enqueue(healthy, "01990a20-6a00-7000-8000-000000000503")
+
+	transport := &deviceScopedTransport{failing: unreachable}
+	if err := NewOutboxWorker(queue, transport, quietLogger()).Drain(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprint(transport.attempted) != fmt.Sprint([]string{unreachable, healthy}) {
+		t.Fatalf("attempted = %v; want one try for the unreachable device, then the healthy one", transport.attempted)
+	}
+	pending, _ := queue.Pending(ctx, 10)
+	if len(pending) != 2 || pending[0].Attempts != 1 || pending[1].Attempts != 0 {
+		t.Fatalf("pending = %+v; want both unreachable-device commands kept, only the first charged an attempt", pending)
 	}
 }

@@ -196,3 +196,47 @@ describe("ServerFarmRepository contract", () => {
     expect(String(fetch.mock.calls[1][0])).toContain("bucketSeconds=600");
   });
 });
+
+describe("ServerFarmRepository integrations", () => {
+  const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+
+  it("lists providers and discovered devices with the bearer credential", async () => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(json([{ provider: "zigbee2mqtt", enabled: true, state: "connected" }]))
+      .mockResolvedValueOnce(json([{ external_id: "0x1" }]));
+    vi.stubGlobal("fetch", fetch);
+    const repository = new ServerFarmRepository("http://api/", { token: "secret" });
+    expect((await repository.listIntegrations())[0].state).toBe("connected");
+    expect((await repository.listDiscovered("zigbee2mqtt"))[0].external_id).toBe("0x1");
+    expect(fetch.mock.calls.map((call) => call[0])).toEqual(["http://api/api/v1/integrations", "http://api/api/v1/integrations/zigbee2mqtt/devices"]);
+    expect(fetch.mock.calls[0][1].headers.Authorization).toBe("Bearer secret");
+  });
+
+  it("adopts with an encoded external identity and tells listeners the farm changed", async () => {
+    const fetch = vi.fn().mockResolvedValueOnce(json({ device: {}, channels: [] }, 201));
+    vi.stubGlobal("fetch", fetch);
+    const repository = new ServerFarmRepository("http://api");
+    const changed = vi.fn();
+    repository["listeners"].add(changed);
+    await repository.adoptDevice("home_assistant", "entity:switch.tent fan", { zone_id: "zone-1", channels: [{ capability_key: "switch.tent_fan" }] });
+    const [url, init] = fetch.mock.calls[0];
+    expect(url).toBe("http://api/api/v1/integrations/home_assistant/devices/entity%3Aswitch.tent%20fan/adopt");
+    expect(init.method).toBe("POST");
+    expect(init.headers["Content-Type"]).toBe("application/json");
+    expect(JSON.parse(init.body)).toEqual({ zone_id: "zone-1", channels: [{ capability_key: "switch.tent_fan" }] });
+    expect(changed).toHaveBeenCalledOnce();
+  });
+
+  it("returns the join deadline and surfaces problem details", async () => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(json({ until: "2026-09-30T12:02:00Z" }, 202))
+      .mockResolvedValueOnce(json({ code: "FORBIDDEN", detail: "Your role does not permit this action" }, 403))
+      .mockResolvedValueOnce(json({ code: "CHANNEL_KEY_CONFLICT", detail: "channel key \"air.temperature\" is already in use" }, 409));
+    vi.stubGlobal("fetch", fetch);
+    const repository = new ServerFarmRepository("http://api");
+    expect(await repository.permitJoin("zigbee2mqtt", 120)).toBe("2026-09-30T12:02:00Z");
+    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({ seconds: 120 });
+    await expect(repository.permitJoin("zigbee2mqtt", 120)).rejects.toThrow("Your role does not permit this action");
+    await expect(repository.adoptDevice("zigbee2mqtt", "0x1", { zone_id: "z", channels: [] })).rejects.toThrow("already in use");
+  });
+});

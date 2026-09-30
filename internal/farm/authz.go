@@ -16,17 +16,24 @@ const (
 	ActionIssueCommand = "command.issue"
 	ActionObserve      = "observation.write"
 	ActionAdminister   = "system.administer"
+	// ActionManageIntegrations covers browsing third-party inventories (a Home
+	// Assistant inventory describes the whole home) and adopting devices.
+	ActionManageIntegrations = "integration.manage"
+	// ActionPairDevices admits new radios to a Zigbee or Matter network.
+	ActionPairDevices = "integration.pair"
 )
 
 // minimumRole is the least privileged tier permitted to perform each action.
 // Replacing the whole farm document is configuration editing, so it requires a
 // manager even though issuing a low-risk command only requires an operator.
 var minimumRole = map[string]auth.Role{
-	ActionRead:         auth.RoleViewer,
-	ActionWriteState:   auth.RoleManager,
-	ActionIssueCommand: auth.RoleOperator,
-	ActionObserve:      auth.RoleOperator,
-	ActionAdminister:   auth.RoleAdministrator,
+	ActionRead:               auth.RoleViewer,
+	ActionWriteState:         auth.RoleManager,
+	ActionIssueCommand:       auth.RoleOperator,
+	ActionObserve:            auth.RoleOperator,
+	ActionAdminister:         auth.RoleAdministrator,
+	ActionManageIntegrations: auth.RoleManager,
+	ActionPairDevices:        auth.RoleAdministrator,
 }
 
 // ErrForbidden reports an authenticated caller whose role is too low.
@@ -59,6 +66,19 @@ func ActorOf(request *http.Request) string {
 		return principal.Subject
 	}
 	return "anonymous"
+}
+
+// Permit authorizes a request for handlers outside this package, writing the
+// problem response itself when the caller is refused.
+func Permit(authorizer Authorizer, writer http.ResponseWriter, request *http.Request, action string) bool {
+	if authorizer == nil {
+		return true
+	}
+	if err := authorizer.Authorize(request, action); err != nil {
+		writeAuthorizationProblem(writer, request, err)
+		return false
+	}
+	return true
 }
 
 func writeAuthorizationProblem(writer http.ResponseWriter, request *http.Request, err error) {

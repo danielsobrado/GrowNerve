@@ -55,3 +55,11 @@ test("keeps the primary workflow usable on a phone viewport", async ({ page }, t
   await page.getByRole("textbox", { name: "Search farm" }).fill("reservoir");
   await expect(page.getByText("DWC Reservoir 01", { exact: true })).toBeVisible();
 });
+
+test("explains that integrations need the server runtime", async ({ page }) => {
+  await openPilot(page);
+  await navigate(page, "Integrations");
+  await expect(page.getByRole("heading", { name: "Integrations" })).toBeVisible();
+  await expect(page.getByText("Integrations need the server runtime.")).toBeVisible();
+  await expect(page.getByText("Server only")).toHaveCount(3);
+});

@@ -40,7 +40,7 @@ func TestConcurrentStateWritesNeverLoseUpdates(t *testing.T) {
 			for attempt := 0; attempt < 200; attempt++ {
 				read := httptest.NewRecorder()
 				handler.ServeHTTP(read, httptest.NewRequest(http.MethodGet, "/api/v1/state", nil))
-				etag := read.Header().Get("ETag")
+				version := read.Header().Get(farmVersionHeader)
 
 				var object map[string]json.RawMessage
 				if err := json.Unmarshal(read.Body.Bytes(), &object); err != nil {
@@ -58,7 +58,7 @@ func TestConcurrentStateWritesNeverLoseUpdates(t *testing.T) {
 
 				request := httptest.NewRequest(http.MethodPut, "/api/v1/state", strings.NewReader(string(body)))
 				request.Header.Set("Content-Type", "application/json")
-				request.Header.Set("If-Match", etag)
+				request.Header.Set(farmVersionHeader, version)
 				write := httptest.NewRecorder()
 				handler.ServeHTTP(write, request)
 

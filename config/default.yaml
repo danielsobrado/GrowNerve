@@ -51,3 +51,15 @@ media:
   provider: filesystem
   path: ./data/media
   maximum_bytes: 16777216
+
+integrations:
+  # Adopted integration devices get a heartbeat this often while their upstream
+  # reports them available. Must be at most half of runtime.device_offline_after.
+  liveness_interval: 30s
+  zigbee2mqtt:
+    # Reads Zigbee devices through a Zigbee2MQTT bridge. See docs/28-integrations.md.
+    enabled: false
+    # Empty uses mqtt.broker and its credentials.
+    broker: ""
+    base_topic: zigbee2mqtt
+    availability_fallback: 90m

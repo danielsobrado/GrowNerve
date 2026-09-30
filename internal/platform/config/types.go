@@ -11,6 +11,9 @@ type Config struct {
 	Telemetry Telemetry `yaml:"telemetry"`
 	Runtime   Runtime   `yaml:"runtime"`
 	Media     Media     `yaml:"media"`
+	// Integrations connects third-party device ecosystems. Every provider is
+	// optional and disabled by default.
+	Integrations Integrations `yaml:"integrations"`
 }
 
 type Server struct {
@@ -72,4 +75,25 @@ type Media struct {
 	Provider     string `yaml:"provider"`
 	Path         string `yaml:"path"`
 	MaximumBytes int64  `yaml:"maximum_bytes"`
+}
+
+type Integrations struct {
+	// LivenessInterval is how often adopted integration devices get a fresh
+	// heartbeat while their upstream reports them available. It must be well
+	// inside runtime.device_offline_after.
+	LivenessInterval time.Duration `yaml:"liveness_interval"`
+	Zigbee2MQTT      Zigbee2MQTT   `yaml:"zigbee2mqtt"`
+}
+
+type Zigbee2MQTT struct {
+	Enabled bool `yaml:"enabled"`
+	// Broker defaults to mqtt.broker (and its credentials) when empty.
+	Broker      string `yaml:"broker"`
+	ClientID    string `yaml:"client_id"`
+	UsernameEnv string `yaml:"username_env"`
+	PasswordEnv string `yaml:"password_env"`
+	BaseTopic   string `yaml:"base_topic"`
+	// AvailabilityFallback treats a device without Zigbee2MQTT availability
+	// reporting as available while its last message is at most this old.
+	AvailabilityFallback time.Duration `yaml:"availability_fallback"`
 }

@@ -64,6 +64,12 @@ func TestRoleRequirementsPerAction(t *testing.T) {
 			if testCase.body != "" {
 				request.Header.Set("Content-Type", "application/json")
 			}
+			if testCase.method == http.MethodPut {
+				// Earlier cases write commands, so replace whatever version is current.
+				read := httptest.NewRecorder()
+				handler.ServeHTTP(read, as(auth.RoleViewer, httptest.NewRequest(http.MethodGet, "/api/v1/state", nil)))
+				request.Header.Set(farmVersionHeader, read.Header().Get(farmVersionHeader))
+			}
 			response := httptest.NewRecorder()
 			handler.ServeHTTP(response, as(testCase.role, request))
 			if response.Code != testCase.want {

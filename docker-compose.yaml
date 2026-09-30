@@ -49,6 +49,7 @@ services:
       GROWNERVE_LOCAL_ACCOUNTS: ${GROWNERVE_LOCAL_ACCOUNTS:-}
       APP_TELEMETRY__RETENTION: ${APP_TELEMETRY__RETENTION:-}
       APP_MEDIA__PATH: /var/lib/grownerve/media
+      APP_INTEGRATIONS__ZIGBEE2MQTT__ENABLED: ${APP_INTEGRATIONS__ZIGBEE2MQTT__ENABLED:-false}
     volumes:
       - media-data:/var/lib/grownerve/media
     ports: ["127.0.0.1:${GROWNERVE_API_PORT:-8080}:8080"]
@@ -68,7 +69,42 @@ services:
     depends_on:
       mosquitto: { condition: service_healthy }
 
+  # Zigbee through Zigbee2MQTT (docs/28-integrations.md). Set
+  # APP_INTEGRATIONS__ZIGBEE2MQTT__ENABLED=true on the api service. The
+  # coordinator is reached over the network (ZIGBEE_SERIAL_PORT, e.g.
+  # tcp://192.168.1.40:6638); for a USB stick add the zigbee-usb override file.
+  zigbee2mqtt:
+    profiles: ["zigbee"]
+    image: koenkk/zigbee2mqtt:2.6.1
+    environment:
+      TZ: ${TZ:-UTC}
+      ZIGBEE2MQTT_CONFIG_MQTT_SERVER: mqtt://mosquitto:1883
+      ZIGBEE2MQTT_CONFIG_MQTT_BASE_TOPIC: zigbee2mqtt
+      ZIGBEE2MQTT_CONFIG_SERIAL_PORT: ${ZIGBEE_SERIAL_PORT:-tcp://127.0.0.1:6638}
+      ZIGBEE2MQTT_CONFIG_SERIAL_ADAPTER: ${ZIGBEE_SERIAL_ADAPTER:-zstack}
+      ZIGBEE2MQTT_CONFIG_AVAILABILITY_ENABLED: "true"
+      ZIGBEE2MQTT_CONFIG_HOMEASSISTANT_ENABLED: "false"
+      ZIGBEE2MQTT_CONFIG_FRONTEND_ENABLED: "true"
+      ZIGBEE2MQTT_CONFIG_FRONTEND_PORT: "8081"
+    ports: ["127.0.0.1:${ZIGBEE2MQTT_FRONTEND_PORT:-8081}:8081"]
+    volumes:
+      - zigbee2mqtt-data:/app/data
+    depends_on:
+      mosquitto: { condition: service_healthy }
+
+  # A simulated Zigbee2MQTT bridge (climate sensor, plug, dimmable light) for
+  # working on the integration without a coordinator.
+  zigbee-sim:
+    profiles: ["zigbee-sim"]
+    image: golang:1.25.13-alpine
+    working_dir: /src
+    volumes: [".:/src"]
+    command: ["go", "run", "./cmd/device-simulator", "-mode", "z2m", "-broker", "tcp://mosquitto:1883"]
+    depends_on:
+      mosquitto: { condition: service_healthy }
+
 volumes:
+  zigbee2mqtt-data:
   postgres-data:
   mosquitto-data:
   media-data:
