@@ -21,8 +21,14 @@ export function readStoredLayouts(): StoredLayout[] {
   return layouts.sort((left, right) => left.facility_id.localeCompare(right.facility_id));
 }
 
+/**
+ * Replaces every saved layout with the given set (an archive import replaces the whole farm, so layouts
+ * of the previous farm must not survive). Storage failures are ignored: the farm data is already imported.
+ */
 export function writeStoredLayouts(layouts: StoredLayout[]): void {
-  for (const entry of layouts) localStorage.setItem(layoutStorageKey(entry.facility_id), JSON.stringify(entry.layout));
+  clearStoredLayouts();
+  try { for (const entry of layouts) localStorage.setItem(layoutStorageKey(entry.facility_id), JSON.stringify(entry.layout)); }
+  catch { /* Storage unavailable or full: the layouts are browser-side extras. */ }
 }
 
 export function clearStoredLayouts(): void {

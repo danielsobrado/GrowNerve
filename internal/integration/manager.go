@@ -381,6 +381,26 @@ func (manager *Manager) Deliver(ctx context.Context, deviceID string, command de
 	return true, nil
 }
 
+// ProviderOf reports which integration, if any, manages a farm device. It reads
+// the stored document rather than the index so a just-adopted device routes
+// correctly; an unreadable document reports no binding (the MQTT route).
+func (manager *Manager) ProviderOf(ctx context.Context, deviceID string) (Provider, bool) {
+	state, _, err := manager.deps.Store.Load(ctx)
+	if err != nil {
+		return "", false
+	}
+	var parsed document
+	if json.Unmarshal(state, &parsed) != nil {
+		return "", false
+	}
+	for _, device := range parsed.Devices {
+		if device.ID == deviceID && device.Integration != nil {
+			return device.Integration.Provider, true
+		}
+	}
+	return "", false
+}
+
 func (manager *Manager) executedRecently(commandID string, now time.Time) bool {
 	manager.mu.Lock()
 	defer manager.mu.Unlock()

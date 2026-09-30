@@ -432,18 +432,23 @@ func (handler *Handler) publishAccepted(ctx context.Context, intent commandInten
 			}
 			// A fast transport (an in-process integration adapter) can report
 			// the result before this write lands. Only a still-pending record
-			// moves to published; anything further along is kept as it is.
+			// moves to published; anything further along is kept as it is,
+			// without rewriting the document (which would bump its version).
 			if record["status"] != "pending" {
 				current = existing
-				return rawState, nil
+				return nil, errNothingToPublish
 			}
 			state.Commands[index] = encoded
 			return replaceKey(rawState, "commands", state.Commands)
 		}
-		return rawState, nil
+		return nil, errNothingToPublish
 	})
 	outcome.encoded = current
 }
+
+// errNothingToPublish aborts publishAccepted's write when the stored record
+// needs no change.
+var errNothingToPublish = errors.New("command record needs no published transition")
 
 func replaceKey(state json.RawMessage, key string, value any) (json.RawMessage, error) {
 	return ReplaceKeys(state, map[string]any{key: value})

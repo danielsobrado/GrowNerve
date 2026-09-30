@@ -63,9 +63,18 @@ func NewOutboxWorker(queue outbox.Store, transport RawPublisher, logger *slog.Lo
 }
 
 // ErrTransportUnavailable reports that a whole command transport is down (the
-// MQTT broker, not one device behind it). Drain stops at such a failure so an
-// outage does not burn an attempt on every queued message.
+// MQTT broker, not one device behind it). Drain stops using that transport for
+// the rest of the pass, so an outage does not burn an attempt on every queued
+// message.
 var ErrTransportUnavailable = errors.New("command transport is unavailable")
+
+// TransportRouter is implemented by a RawPublisher that fronts more than one
+// transport (the MQTT bridge and the integration adapters). TransportFor names
+// the transport a topic will use, so an outage of one transport only holds
+// back that transport's messages. A publisher without it is one transport.
+type TransportRouter interface {
+	TransportFor(ctx context.Context, topic string) string
+}
 
 func (worker *OutboxWorker) Drain(ctx context.Context) error {
 	pending, err := worker.queue.Pending(ctx, worker.batchSize)
@@ -76,9 +85,17 @@ func (worker *OutboxWorker) Drain(ctx context.Context) error {
 	// hold back commands for every other device, so later messages for the
 	// same topic are skipped for this pass and the rest of the batch continues.
 	blocked := map[string]bool{}
+	// A whole transport that is down is skipped for the rest of the pass, but
+	// only that transport: a broker outage must not strand Zigbee commands.
+	router, _ := worker.transport.(TransportRouter)
+	down := map[string]bool{}
 	for _, message := range pending {
 		if blocked[message.Topic] {
 			continue
+		}
+		route := ""
+		if router != nil {
+			route = router.TransportFor(ctx, message.Topic)
 		}
 		if command, discard, reason := queuedCommandDisposition(message, worker.now()); discard {
 			// MarkPublished is the store's terminal-success state. For commands it
@@ -90,6 +107,9 @@ func (worker *OutboxWorker) Drain(ctx context.Context) error {
 			worker.logger.Warn("outbox_command_discarded", "message", message.ID, "command", command.CommandID, "topic", message.Topic, "reason", reason)
 			continue
 		}
+		if down[route] {
+			continue
+		}
 		if err := worker.transport.PublishRaw(ctx, message.Topic, message.Payload); err != nil {
 			if markErr := worker.queue.MarkFailed(ctx, message.ID, err.Error()); markErr != nil {
 				return markErr
@@ -98,7 +118,8 @@ func (worker *OutboxWorker) Drain(ctx context.Context) error {
 				worker.logger.Error("outbox_message_parked", "message", message.ID, "topic", message.Topic, "attempts", message.Attempts+1)
 			}
 			if errors.Is(err, ErrTransportUnavailable) {
-				return nil
+				down[route] = true
+				continue
 			}
 			blocked[message.Topic] = true
 			continue

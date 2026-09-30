@@ -177,6 +177,10 @@ func validateRuntimeSecrets(cfg config.Config) error {
 	if strings.TrimSpace(os.Getenv(cfg.MQTT.UsernameEnv)) == "" || strings.TrimSpace(os.Getenv(cfg.MQTT.PasswordEnv)) == "" {
 		return errors.New("production MQTT credential environment variables must contain non-empty values")
 	}
+	if zigbee := cfg.Integrations.Zigbee2MQTT; zigbee.Enabled && zigbee.Broker != "" &&
+		(strings.TrimSpace(os.Getenv(zigbee.UsernameEnv)) == "" || strings.TrimSpace(os.Getenv(zigbee.PasswordEnv)) == "") {
+		return errors.New("production Zigbee2MQTT credential environment variables must contain non-empty values")
+	}
 	return nil
 }
 

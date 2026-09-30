@@ -50,6 +50,23 @@ func (router *Router) PublishRaw(ctx context.Context, topic string, payload []by
 	return router.fallback.PublishRaw(ctx, topic, payload)
 }
 
+// Transport names used by TransportFor.
+const TransportMQTT = "mqtt"
+
+// TransportFor tells the outbox which transport will carry a queued message,
+// so a broker outage holds back only MQTT deliveries and an integration's
+// commands keep flowing (and the reverse).
+func (router *Router) TransportFor(ctx context.Context, topic string) string {
+	deviceID, isCommand := farm.ParseCommandTopic(topic)
+	if !isCommand || router.manager == nil || !router.manager.Enabled() {
+		return TransportMQTT
+	}
+	if provider, bound := router.manager.ProviderOf(ctx, deviceID); bound {
+		return "integration:" + string(provider)
+	}
+	return TransportMQTT
+}
+
 // FanOut delivers every notification to each notifier.
 func FanOut(notifiers ...farm.Notifier) farm.Notifier { return fanOut(notifiers) }
 

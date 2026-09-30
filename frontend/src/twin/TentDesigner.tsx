@@ -227,8 +227,12 @@ export function TentDesignerScene({ editor, quality }: { editor: Editor; quality
     fitted.current = { environment: layout.environment, span };
   }, [camera, layout.environment, span]);
   useEffect(() => { canvas.dataset.tentLayout = JSON.stringify(layout); return () => { delete canvas.dataset.tentLayout; }; }, [canvas, layout]);
+  // The editor object is rebuilt on every render; read it through a ref so the key listener is registered once.
+  const latestEditor = useRef(editor);
+  useLayoutEffect(() => { latestEditor.current = editor; });
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
+      const editor = latestEditor.current;
       if (!editor.item || (event.target as HTMLElement | null)?.closest("input, select, textarea, [contenteditable='true']")) return;
       const key = event.key.toLowerCase(), modifier = event.ctrlKey || event.metaKey;
       if (key === "escape") editor.select(undefined);
@@ -243,7 +247,7 @@ export function TentDesignerScene({ editor, quality }: { editor: Editor; quality
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [editor]);
+  }, []);
   return <>
     {outdoor ? <>
       <color attach="background" args={["#16222a"]} />

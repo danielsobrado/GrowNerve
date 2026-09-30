@@ -409,3 +409,57 @@ func TestHTTPAuthorizationAndInventory(t *testing.T) {
 		t.Fatalf("permit-join on an adapter without support = %d %s", response.Code, response.Body.String())
 	}
 }
+
+// downBroker is an MQTT bridge whose broker is unreachable.
+type downBroker struct{ attempts int }
+
+func (broker *downBroker) PublishCommand(context.Context, string, deviceprotocol.Command) error {
+	broker.attempts++
+	return farm.ErrTransportUnavailable
+}
+func (broker *downBroker) PublishRaw(context.Context, string, []byte) error {
+	broker.attempts++
+	return farm.ErrTransportUnavailable
+}
+
+func TestBrokerOutageDoesNotStrandIntegrationCommands(t *testing.T) {
+	fixture := newFixture(t)
+	plug := fixture.adoptPlug(t)
+	broker := &downBroker{}
+	router := NewRouter(broker, fixture.manager)
+	queue := outbox.NewMemoryStore()
+	now := time.Now().UTC()
+	enqueue := func(deviceID, channelID, commandID string) {
+		payload, _ := json.Marshal(deviceprotocol.Command{
+			ProtocolVersion: deviceprotocol.Version, CommandID: commandID, TargetChannelID: channelID,
+			Type: "set_boolean", Value: true, IssuedAt: now, ExpiresAt: now.Add(time.Minute),
+		})
+		if _, err := queue.Enqueue(context.Background(), farm.CommandTopic(deviceID), commandID, payload); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Two ESP32 commands queued ahead of the plug's.
+	enqueue(esp32ID, esp32Channel, "01990a20-6a00-7000-8000-000000000911")
+	enqueue(esp32ID, esp32Channel, "01990a20-6a00-7000-8000-000000000912")
+	enqueue(plug.Device["id"].(string), plug.Channels[0]["id"].(string), "01990a20-6a00-7000-8000-000000000913")
+
+	if got := router.TransportFor(context.Background(), farm.CommandTopic(plug.Device["id"].(string))); got != "integration:zigbee2mqtt" {
+		t.Fatalf("plug transport = %q", got)
+	}
+	if got := router.TransportFor(context.Background(), farm.CommandTopic(esp32ID)); got != TransportMQTT {
+		t.Fatalf("ESP32 transport = %q", got)
+	}
+	if err := farm.NewOutboxWorker(queue, router, slog.New(slog.NewTextHandler(io.Discard, nil))).Drain(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if fixture.adapter.executions() != 1 {
+		t.Fatal("the broker outage stranded the Zigbee command behind the ESP32 commands")
+	}
+	if broker.attempts != 1 {
+		t.Fatalf("broker attempts = %d; the outage should cost one attempt, not one per queued message", broker.attempts)
+	}
+	pending, _ := queue.Pending(context.Background(), 10)
+	if len(pending) != 2 {
+		t.Fatalf("pending = %+v; want both ESP32 commands kept for retry", pending)
+	}
+}

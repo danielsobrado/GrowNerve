@@ -62,10 +62,9 @@ type boundChannel struct {
 // bound to which provider devices and capabilities. Readings are resolved
 // against it instead of rewriting the farm document per reading.
 type bindingIndex struct {
-	devices     map[externalRef]boundDevice
-	byID        map[string]boundDevice
-	channels    map[string][]boundChannel
-	byChannelID map[string]boundChannel
+	devices  map[externalRef]boundDevice
+	byID     map[string]boundDevice
+	channels map[string][]boundChannel
 }
 
 func channelSlot(deviceID, key string) string { return deviceID + "\x00" + key }
@@ -73,7 +72,7 @@ func channelSlot(deviceID, key string) string { return deviceID + "\x00" + key }
 func emptyIndex() *bindingIndex {
 	return &bindingIndex{
 		devices: map[externalRef]boundDevice{}, byID: map[string]boundDevice{},
-		channels: map[string][]boundChannel{}, byChannelID: map[string]boundChannel{},
+		channels: map[string][]boundChannel{},
 	}
 }
 
@@ -104,7 +103,6 @@ func buildIndex(state json.RawMessage) (*bindingIndex, error) {
 		}
 		slot := channelSlot(channel.DeviceID, channel.IntegrationKey)
 		index.channels[slot] = append(index.channels[slot], entry)
-		index.byChannelID[channel.ID] = entry
 	}
 	return index, nil
 }

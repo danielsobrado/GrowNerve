@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"sort"
 	"strconv"
 	"time"
 
@@ -121,6 +122,8 @@ func (handler *Handler) projectMeasurements(ctx context.Context, state json.RawM
 // withLatestPerChannel adds each channel's newest reading when the recent
 // window does not already hold one. A chatty integration plug can otherwise
 // push a sleepy battery sensor out of the window and blank its current value.
+// The additions are older than everything in the window, so they are placed
+// first (oldest first) to keep the projection in chronological order.
 func withLatestPerChannel(ctx context.Context, reader TelemetryReader, recent []telemetry.Measurement) []telemetry.Measurement {
 	latest, err := reader.Latest(ctx)
 	if err != nil || len(latest) == 0 {
@@ -130,12 +133,17 @@ func withLatestPerChannel(ctx context.Context, reader TelemetryReader, recent []
 	for _, measurement := range recent {
 		present[measurement.ChannelID] = true
 	}
+	var missing []telemetry.Measurement
 	for _, measurement := range latest {
 		if !present[measurement.ChannelID] {
-			recent = append(recent, measurement)
+			missing = append(missing, measurement)
 		}
 	}
-	return recent
+	if len(missing) == 0 {
+		return recent
+	}
+	sort.SliceStable(missing, func(left, right int) bool { return missing[left].ObservedAt.Before(missing[right].ObservedAt) })
+	return append(missing, recent...)
 }
 
 func optionalTime(value string) (time.Time, error) {
